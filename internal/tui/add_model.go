@@ -59,6 +59,9 @@ type AddTaskModel struct {
 	
 	// Tag input state
 	isAddingTags bool
+	
+	// Shimmer effect for field labels
+	shimmer *ShimmerState
 }
 
 // NewAddTaskModel creates a new add task TUI model
@@ -105,11 +108,16 @@ func NewAddTaskModel(prefilled map[string]string) AddTaskModel {
 	inputs[6].Placeholder = "Additional notes (Enter to skip)"
 	inputs[6].CharLimit = 500
 
+	// Initialize shimmer effect
+	shimmerConfig := DefaultShimmerConfig()
+	shimmer := NewShimmerState(shimmerConfig)
+
 	m := AddTaskModel{
 		currentStep: StepTitle,
 		inputs:      inputs,
 		prefilled:   prefilled,
 		tags:        []string{},
+		shimmer:     shimmer,
 	}
 	
 	// Set pre-filled values
@@ -146,12 +154,33 @@ func NewAddTaskModel(prefilled map[string]string) AddTaskModel {
 
 // Init initializes the model
 func (m AddTaskModel) Init() tea.Cmd {
-	return textinput.Blink
+	cmds := []tea.Cmd{textinput.Blink}
+	
+	// Start shimmer ticking if enabled
+	if m.shimmer.ShouldTick() {
+		cmds = append(cmds, tea.Tick(m.shimmer.GetTickInterval(), func(time.Time) tea.Msg {
+			return shimmerTickMsg{}
+		}))
+	}
+	
+	return tea.Batch(cmds...)
 }
+
+// shimmerTickMsg is sent when shimmer should update
+type shimmerTickMsg struct{}
 
 // Update handles messages
 func (m AddTaskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case shimmerTickMsg:
+		// Continue shimmer animation
+		if m.shimmer.ShouldTick() {
+			return m, tea.Tick(m.shimmer.GetTickInterval(), func(time.Time) tea.Msg {
+				return shimmerTickMsg{}
+			})
+		}
+		return m, nil
+		
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -497,7 +526,7 @@ func (m AddTaskModel) renderPreview() string {
 	cardContent.WriteString(separatorStyle.Render("═══════════════════════════════════"))
 	cardContent.WriteString("\n")
 	
-	// Title section with nice border box
+	// Title section with nice border box and shimmer effect
 	var titleText string
 	if m.title != "" {
 		titleText = m.title
@@ -505,18 +534,20 @@ func (m AddTaskModel) renderPreview() string {
 		titleText = "Untitled Task"
 	}
 	
-	// Create a fancy title box with double border - white text
+	// Apply shimmer to the title text
+	shimmerTitle := m.shimmer.RenderShimmerText(titleText, cardWidth - 6) // Account for border and padding
+	
+	// Create a fancy title box with double border
 	titleBoxStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color(ColorAccentMain)).
-		Foreground(lipgloss.Color(ColorPrimaryText)).
 		Bold(true).
 		Padding(0, 1).
 		Align(lipgloss.Center).
 		Width(cardWidth - 4) // Fit within card
 	
-	// Add emoji and title together
-	titleWithEmoji := fmt.Sprintf("🎯 %s", titleText)
+	// Add emoji and shimmered title together (reset ANSI codes so border displays properly)
+	titleWithEmoji := fmt.Sprintf("🎯 %s\033[0m", shimmerTitle)
 	cardContent.WriteString(titleBoxStyle.Render(titleWithEmoji))
 	cardContent.WriteString("\n")
 	
@@ -813,6 +844,8 @@ func (m AddTaskModel) nextStep() (AddTaskModel, tea.Cmd) {
 		m.inputs[m.currentStep].Blur()
 		m.currentStep++
 		m.inputs[m.currentStep].Focus()
+		// Reset shimmer for new field
+		m.shimmer.Reset()
 	}
 	return m, textinput.Blink
 }
@@ -823,6 +856,8 @@ func (m AddTaskModel) prevStep() (AddTaskModel, tea.Cmd) {
 		m.inputs[m.currentStep].Blur()
 		m.currentStep--
 		m.inputs[m.currentStep].Focus()
+		// Reset shimmer for new field
+		m.shimmer.Reset()
 	}
 	return m, textinput.Blink
 }
