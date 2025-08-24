@@ -56,9 +56,9 @@ wrok add "Simple task without metadata"
 
 | Input | Result |
 |-------|--------|
-| `Fix login bug #backend #urgent @auth !high ABC-123` | Title: "Fix login bug !high"<br>Project: auth<br>Tags: backend, urgent<br>JIRA: ABC-123<br>Priority: high |
-| `Update database schema #db !medium DEV-456` | Title: "Update database schema !medium"<br>Tags: db<br>JIRA: DEV-456<br>Priority: medium |
-| `Write docs @documentation !1 #writing #markdown` | Title: "Write docs !1"<br>Project: documentation<br>Tags: writing, markdown<br>Priority: low |
+| `Fix login bug #backend #urgent @auth +high ABC-123` | Title: "Fix login bug"<br>Project: auth<br>Tags: backend, urgent<br>JIRA: ABC-123<br>Priority: high |
+| `Update database schema #db +medium DEV-456` | Title: "Update database schema"<br>Tags: db<br>JIRA: DEV-456<br>Priority: medium |
+| `Write docs @documentation +1 #writing #markdown` | Title: "Write docs"<br>Project: documentation<br>Tags: writing, markdown<br>Priority: low |
 | `Simple task without any parsing` | Title: "Simple task without any parsing"<br>(no metadata) |
 
 ## Available Flags
@@ -90,10 +90,10 @@ wrok add "Weekly sync @team" --due "1 week"
 
 ## Pro Tips
 
-1. **Order doesn't matter**: `#tag @project !priority` or `!priority #tag @project` both work
+1. **Order doesn't matter**: `#tag @project +priority` or `+priority #tag @project` both work
 2. **Flexible spacing**: Spaces around symbols are optional
 3. **Case insensitive JIRA**: `abc-123` becomes `ABC-123`
-4. **Priority display**: Priority is kept in the title for visual reference
+4. **Clean titles**: Metadata is extracted and removed from the title
 5. **Combine with flags**: Smart parsing + flags gives you maximum flexibility
 6. **Interactive preview**: Use interactive mode to see real-time parsing as you type
 
