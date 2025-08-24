@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -13,148 +14,6 @@ import (
 	"github.com/balkashynov/wrok/internal/parser"
 )
 
-// createBigText converts text to big block letters (simplified version)
-func createBigText(text string) string {
-	if len(text) == 0 {
-		return "No title..."
-	}
-	
-	// Limit length to prevent overflow
-	if len(text) > 10 {
-		text = text[:7] + "..."
-	}
-	
-	text = strings.ToUpper(text)
-	
-	// Simple 3-line block font
-	line1 := ""
-	line2 := ""
-	line3 := ""
-	
-	for _, char := range text {
-		switch char {
-		case 'A':
-			line1 += "███ "
-			line2 += "█▀█ "
-			line3 += "█▄█ "
-		case 'B':
-			line1 += "██▄ "
-			line2 += "██▄ "
-			line3 += "██▀ "
-		case 'C':
-			line1 += "▄██ "
-			line2 += "█   "
-			line3 += "▀██ "
-		case 'D':
-			line1 += "██▄ "
-			line2 += "█ █ "
-			line3 += "██▀ "
-		case 'E':
-			line1 += "███ "
-			line2 += "██▄ "
-			line3 += "███ "
-		case 'F':
-			line1 += "███ "
-			line2 += "██▄ "
-			line3 += "█   "
-		case 'G':
-			line1 += "▄██ "
-			line2 += "█▄█ "
-			line3 += "▀██ "
-		case 'H':
-			line1 += "█ █ "
-			line2 += "███ "
-			line3 += "█ █ "
-		case 'I':
-			line1 += "███ "
-			line2 += " █  "
-			line3 += "███ "
-		case 'J':
-			line1 += "███ "
-			line2 += "  █ "
-			line3 += "██▀ "
-		case 'K':
-			line1 += "█ █ "
-			line2 += "██  "
-			line3 += "█ █ "
-		case 'L':
-			line1 += "█   "
-			line2 += "█   "
-			line3 += "███ "
-		case 'M':
-			line1 += "█▄█ "
-			line2 += "█▀█ "
-			line3 += "█ █ "
-		case 'N':
-			line1 += "█▄█ "
-			line2 += "█▀█ "
-			line3 += "█ █ "
-		case 'O':
-			line1 += "▄█▄ "
-			line2 += "█ █ "
-			line3 += "▀█▀ "
-		case 'P':
-			line1 += "██▄ "
-			line2 += "██▀ "
-			line3 += "█   "
-		case 'Q':
-			line1 += "▄█▄ "
-			line2 += "█ █ "
-			line3 += "▀██ "
-		case 'R':
-			line1 += "██▄ "
-			line2 += "██▄ "
-			line3 += "█ █ "
-		case 'S':
-			line1 += "▄██ "
-			line2 += "▀█▄ "
-			line3 += "██▀ "
-		case 'T':
-			line1 += "███ "
-			line2 += " █  "
-			line3 += " █  "
-		case 'U':
-			line1 += "█ █ "
-			line2 += "█ █ "
-			line3 += "▀█▀ "
-		case 'V':
-			line1 += "█ █ "
-			line2 += "█ █ "
-			line3 += " █  "
-		case 'W':
-			line1 += "█ █ "
-			line2 += "█▀█ "
-			line3 += "█▄█ "
-		case 'X':
-			line1 += "█ █ "
-			line2 += " █  "
-			line3 += "█ █ "
-		case 'Y':
-			line1 += "█ █ "
-			line2 += " █  "
-			line3 += " █  "
-		case 'Z':
-			line1 += "███ "
-			line2 += " █  "
-			line3 += "███ "
-		case ' ':
-			line1 += "  "
-			line2 += "  "
-			line3 += "  "
-		case '.':
-			line1 += "   "
-			line2 += "   "
-			line3 += "▄  "
-		default:
-			// For unsupported chars, use a simple block
-			line1 += "█ "
-			line2 += "█ "
-			line3 += "█ "
-		}
-	}
-	
-	return fmt.Sprintf("%s\n%s\n%s", line1, line2, line3)
-}
 
 
 // Step represents the current step in the wizard
@@ -206,48 +65,45 @@ type AddTaskModel struct {
 func NewAddTaskModel(prefilled map[string]string) AddTaskModel {
 	inputs := make([]textinput.Model, 7)
 	
+	// Apply color theme to all inputs
+	for i := 0; i < 7; i++ {
+		inputs[i] = textinput.New()
+		inputs[i].Width = 60
+		
+		// Apply color scheme
+		inputs[i].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPrimaryText))
+		inputs[i].PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPlaceholder))
+		inputs[i].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright))
+	}
+	
 	// Title input
-	inputs[0] = textinput.New()
 	inputs[0].Placeholder = "Enter task title... (required)"
 	inputs[0].Focus()
 	inputs[0].CharLimit = 200
-	inputs[0].Width = 60 // Explicit width control
 	
 	// Project input
-	inputs[1] = textinput.New()
 	inputs[1].Placeholder = "Project name (Enter to skip)"
 	inputs[1].CharLimit = 50
-	inputs[1].Width = 60
 	
-	// Tags input (we'll handle this specially)
-	inputs[2] = textinput.New()
+	// Tags input
 	inputs[2].Placeholder = "Add tag (Enter to skip, 'q' when done adding tags)"
 	inputs[2].CharLimit = 50
-	inputs[2].Width = 60
 	
 	// Priority input
-	inputs[3] = textinput.New()
 	inputs[3].Placeholder = "low/medium/high or 1/2/3 (Enter to skip - no priority)"
 	inputs[3].CharLimit = 10
-	inputs[3].Width = 60
 	
 	// JIRA input
-	inputs[4] = textinput.New()
 	inputs[4].Placeholder = "JIRA ticket like APP-42 (Enter to skip)"
 	inputs[4].CharLimit = 20
-	inputs[4].Width = 60
 	
 	// Due date input
-	inputs[5] = textinput.New()
 	inputs[5].Placeholder = "Due: dd/mm/yyyy, 3 days, 24 hours, 2 weeks (Enter to skip)"
 	inputs[5].CharLimit = 50
-	inputs[5].Width = 60
 	
 	// Notes input
-	inputs[6] = textinput.New()
 	inputs[6].Placeholder = "Additional notes (Enter to skip)"
 	inputs[6].CharLimit = 500
-	inputs[6].Width = 60
 
 	m := AddTaskModel{
 		currentStep: StepTitle,
@@ -357,31 +213,44 @@ func (m AddTaskModel) View() string {
 		return ""  // Don't show anything, let TUI handle exit message
 	}
 	
-	// Split screen styles - left takes 2/3, right takes 1/3
-	// Add some margin between panels
-	leftWidth := (m.width * 2 / 3) - 3
-	rightWidth := (m.width / 3) - 3
-	
-	// Ensure minimum widths
-	if leftWidth < 40 {
-		leftWidth = 40
+	// Handle very small terminals
+	if m.width < 85 {
+		return m.renderSmallLayout()
 	}
-	if rightWidth < 25 {
-		rightWidth = 25
+	
+	// Calculate adaptive column widths
+	rightWidth := (m.width * 30) / 100 // Start with 30%
+	if rightWidth < 50 {
+		// Need more space, take up to 70%
+		maxRightWidth := (m.width * 70) / 100
+		if maxRightWidth >= 50 {
+			rightWidth = 50
+		} else {
+			// Fallback to small layout
+			return m.renderSmallLayout()
+		}
+	}
+	
+	leftWidth := m.width - rightWidth - 4 // Account for margins
+	
+	// Ensure minimum left width
+	if leftWidth < 30 {
+		leftWidth = 30
+		rightWidth = m.width - leftWidth - 4
 	}
 	
 	leftStyle := lipgloss.NewStyle().
 		Width(leftWidth).
 		Height(m.height - 2).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(lipgloss.Color(ColorBorder)).
 		Padding(1)
 		
 	rightStyle := lipgloss.NewStyle().
 		Width(rightWidth).
 		Height(m.height - 2).
 		Padding(1)
-	
+
 	// Left side: Step-by-step wizard
 	left := m.renderWizard()
 	
@@ -405,28 +274,73 @@ func (m AddTaskModel) View() string {
 func (m AddTaskModel) renderWizard() string {
 	var b strings.Builder
 	
+	
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("62")).
+		Foreground(lipgloss.Color(ColorAccentBright)).
 		MarginBottom(1)
 	b.WriteString(titleStyle.Render("📝 Create New Task"))
 	b.WriteString("\n\n")
 	
-	// Current step indicator
+	// Current step indicator with dynamic coloring (with fallback)
 	stepLabels := []string{"Title", "Project", "Tags", "Priority", "JIRA", "Due Date", "Notes"}
-	for i, label := range stepLabels {
-		if Step(i) == m.currentStep {
-			b.WriteString(fmt.Sprintf("▶ %s\n", label))
-		} else if Step(i) < m.currentStep {
-			b.WriteString(fmt.Sprintf("✓ %s\n", label))
-		} else {
-			b.WriteString(fmt.Sprintf("  %s\n", label))
+	
+	// Check if terminal supports colors
+	supportsColor := m.terminalSupportsColor()
+	
+	if supportsColor {
+		// Define color codes for direct terminal output
+		purpleColor := "\033[38;2;167;139;250m"   // ColorAccentBright - current step (purple)
+		greenColor := "\033[38;2;34;197;94m"      // ColorSuccess - completed steps (green)
+		darkGreyPurpleColor := "\033[38;2;109;115;131m" // ColorDisabledText - skipped steps (darker grey-purple)
+		lightGreyColor := "\033[38;2;177;184;199m"      // ColorSecondaryText - future steps (lighter default grey)
+		resetColor := "\033[0m"
+		
+		for i, label := range stepLabels {
+			if Step(i) == m.currentStep {
+				// Current step - purple arrow
+				b.WriteString(fmt.Sprintf("%s▶ %s%s\n", purpleColor, label, resetColor))
+			} else if Step(i) < m.currentStep {
+				// Check if step was actually completed or skipped
+				hasValue := m.stepHasValue(Step(i))
+				if hasValue {
+					// Completed with value - green checkmark and text
+					b.WriteString(fmt.Sprintf("%s✓ %s%s\n", greenColor, label, resetColor))
+				} else {
+					// Skipped - no icon, darker grey-purple text
+					b.WriteString(fmt.Sprintf("%s  %s%s\n", darkGreyPurpleColor, label, resetColor))
+				}
+			} else {
+				// Future step - lighter default grey
+				b.WriteString(fmt.Sprintf("%s  %s%s\n", lightGreyColor, label, resetColor))
+			}
+		}
+	} else {
+		// Fallback for terminals that don't support colors - plain text
+		for i, label := range stepLabels {
+			if Step(i) == m.currentStep {
+				// Current step - arrow
+				b.WriteString(fmt.Sprintf("▶ %s\n", label))
+			} else if Step(i) < m.currentStep {
+				// Check if step was actually completed or skipped
+				hasValue := m.stepHasValue(Step(i))
+				if hasValue {
+					// Completed with value - checkmark
+					b.WriteString(fmt.Sprintf("✓ %s\n", label))
+				} else {
+					// Skipped - no icon
+					b.WriteString(fmt.Sprintf("  %s\n", label))
+				}
+			} else {
+				// Future step
+				b.WriteString(fmt.Sprintf("  %s\n", label))
+			}
 		}
 	}
 	b.WriteString("\n")
 	
-	// Current input field
+	// Current input field - simple text without styling boxes
 	switch m.currentStep {
 	case StepTitle:
 		b.WriteString("📋 Task Title\n")
@@ -463,7 +377,7 @@ func (m AddTaskModel) renderWizard() string {
 	// Show validation error if any
 	if m.validationErr != "" {
 		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")). // Red
+			Foreground(lipgloss.Color(ColorError)).
 			Bold(true).
 			MarginTop(1)
 		b.WriteString(errorStyle.Render("❌ " + m.validationErr))
@@ -473,21 +387,65 @@ func (m AddTaskModel) renderWizard() string {
 	
 	// Help text
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(lipgloss.Color(ColorHelpText)).
 		Italic(true)
 	b.WriteString(helpStyle.Render("Enter: Next | Tab/↓: Next | Shift+Tab/↑: Back | Esc: Cancel"))
 	
 	return b.String()
 }
 
+// terminalSupportsColor checks if the terminal supports ANSI truecolor
+func (m AddTaskModel) terminalSupportsColor() bool {
+	// Only support terminals with truecolor capability
+	colorTerm := os.Getenv("COLORTERM")
+	
+	// Only enable colors for truecolor terminals
+	return colorTerm == "truecolor"
+}
+
+// stepHasValue checks if a step has been filled with a value (not skipped)
+func (m AddTaskModel) stepHasValue(step Step) bool {
+	switch step {
+	case StepTitle:
+		return strings.TrimSpace(m.title) != ""
+	case StepProject:
+		return strings.TrimSpace(m.project) != ""
+	case StepTags:
+		return len(m.tags) > 0
+	case StepPriority:
+		return strings.TrimSpace(m.priority) != ""
+	case StepJira:
+		return strings.TrimSpace(m.jiraID) != ""
+	case StepDueDate:
+		return strings.TrimSpace(m.dueDate) != ""
+	case StepNotes:
+		return strings.TrimSpace(m.notes) != ""
+	default:
+		return false
+	}
+}
+
 // renderPreview renders the live task preview
 func (m AddTaskModel) renderPreview() string {
 	var b strings.Builder
 	
-	// Calculate available width and height for the right panel
-	rightPanelWidth := (m.width / 3) - 3
-	if rightPanelWidth < 30 {
-		rightPanelWidth = 30
+	// Handle very small terminals with fallback
+	if m.width < 85 {
+		return m.renderSmallPreview()
+	}
+	
+	// Calculate adaptive width for right panel
+	// Start with 30% but ensure minimum 50px and allow up to 70%
+	rightPanelWidth := (m.width * 30) / 100 // Start with 30%
+	if rightPanelWidth < 50 {
+		// If too small, take more space up to 70%
+		maxRightWidth := (m.width * 70) / 100
+		if maxRightWidth >= 50 {
+			rightPanelWidth = 50
+		} else {
+			// Terminal too small for proper layout
+			return m.renderSmallPreview()
+		}
 	}
 	
 	// Calculate vertical centering
@@ -515,9 +473,9 @@ func (m AddTaskModel) renderPreview() string {
 	// Build card content first
 	var cardContent strings.Builder
 	
-	// WROK ASCII Logo with spinning O
+	// WROK ASCII Logo
 	logoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99")). // Darker purple instead of light pink
+		Foreground(lipgloss.Color(ColorAccentMain)).
 		Bold(true).
 		Align(lipgloss.Center)
 	
@@ -534,41 +492,41 @@ func (m AddTaskModel) renderPreview() string {
 	
 	// Separator line
 	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99")). // Same darker purple
+		Foreground(lipgloss.Color(ColorAccentMain)).
 		Align(lipgloss.Center)
 	cardContent.WriteString(separatorStyle.Render("═══════════════════════════════════"))
 	cardContent.WriteString("\n")
 	
-	// Title section with BIG text
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("255")). // White
-		Align(lipgloss.Center)
-		
-	// Add emoji first
-	cardContent.WriteString(titleStyle.Render("🎯"))
-	cardContent.WriteString("\n")
-	
-	// Then add the big title text
+	// Title section with nice border box
 	var titleText string
 	if m.title != "" {
 		titleText = m.title
 	} else {
-		titleText = "TASK"
+		titleText = "Untitled Task"
 	}
 	
-	bigTitle := createBigText(titleText)
-	cardContent.WriteString(titleStyle.Render(bigTitle))
+	// Create a fancy title box with double border - white text
+	titleBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color(ColorAccentMain)).
+		Foreground(lipgloss.Color(ColorPrimaryText)).
+		Bold(true).
+		Padding(0, 1).
+		Align(lipgloss.Center).
+		Width(cardWidth - 4) // Fit within card
+	
+	// Add emoji and title together
+	titleWithEmoji := fmt.Sprintf("🎯 %s", titleText)
+	cardContent.WriteString(titleBoxStyle.Render(titleWithEmoji))
 	cardContent.WriteString("\n")
 	
-	// Status with nice styling
+	// Status with nice styling - placeholder purple and lowercase
 	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("46")). // Green
-		Background(lipgloss.Color("22")). // Dark green bg
+		Foreground(lipgloss.Color(ColorPlaceholder)).
 		Bold(true).
 		Padding(0, 1).
 		Align(lipgloss.Center)
-	cardContent.WriteString(statusStyle.Render("● TODO"))
+	cardContent.WriteString(statusStyle.Render("● todo"))
 	cardContent.WriteString("\n")
 	
 	// Separator (reuse animated style)
@@ -590,7 +548,7 @@ func (m AddTaskModel) renderPreview() string {
 	// Tags with purple styling
 	if len(m.tags) > 0 {
 		tagStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("135")).
+			Foreground(lipgloss.Color(ColorAccentBright)).
 			Bold(true)
 		var styledTags []string
 		for _, tag := range m.tags {
@@ -607,17 +565,17 @@ func (m AddTaskModel) renderPreview() string {
 		switch normalizedPriority {
 		case "high":
 			priorityDisplay = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196")).
+				Foreground(lipgloss.Color(ColorError)).
 				Bold(true).
 				Render("🔥 HIGH")
 		case "medium":
 			priorityDisplay = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")).
+				Foreground(lipgloss.Color(ColorWarning)).
 				Bold(true).
 				Render("⚡ MEDIUM")
 		case "low":
 			priorityDisplay = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("46")).
+				Foreground(lipgloss.Color(ColorSuccess)).
 				Bold(true).
 				Render("🟢 LOW")
 		}
@@ -633,16 +591,24 @@ func (m AddTaskModel) renderPreview() string {
 			normalized, _ := parser.NormalizeJiraID(m.jiraID)
 			displayJira = normalized
 		} else {
-			warningText = " ⚠️ Expected XXX-123"
+			warningText = " (Expected XXX-123)"
 		}
 		
 		jiraStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("33")).
-			Background(lipgloss.Color("17")).
+			Foreground(lipgloss.Color(ColorPrimaryText)).
+			Background(lipgloss.Color(ColorBorder)).
 			Bold(true).
 			Padding(0, 1)
 		
-		metadata.WriteString(fmt.Sprintf("🎫 JIRA: %s%s\n", jiraStyle.Render(displayJira), warningText))
+		if warningText != "" {
+			// Show JIRA with darker grey hint text
+			warningStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorHelpText)).
+				Italic(true)
+			metadata.WriteString(fmt.Sprintf("🎫 JIRA: %s %s\n", jiraStyle.Render(displayJira), warningStyle.Render(warningText)))
+		} else {
+			metadata.WriteString(fmt.Sprintf("🎫 JIRA: %s\n", jiraStyle.Render(displayJira)))
+		}
 	}
 	
 	// Due date
@@ -659,7 +625,7 @@ func (m AddTaskModel) renderPreview() string {
 	// Notes
 	if m.notes != "" {
 		noteStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("180")).
+			Foreground(lipgloss.Color(ColorSecondaryText)).
 			Italic(true)
 		metadata.WriteString(fmt.Sprintf("📝 Notes: %s\n", noteStyle.Render(m.notes)))
 	}
@@ -670,7 +636,7 @@ func (m AddTaskModel) renderPreview() string {
 	// Create the card with static purple border
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("99")). // Darker purple border
+		BorderForeground(lipgloss.Color(ColorAccentMain)).
 		Width(cardWidth).
 		Padding(1).
 		Align(lipgloss.Center)
@@ -684,6 +650,73 @@ func (m AddTaskModel) renderPreview() string {
 	b.WriteString(cardContainer.Render(card))
 	
 	return b.String()
+}
+
+// renderSmallPreview renders a compact preview for small terminals
+func (m AddTaskModel) renderSmallPreview() string {
+	var b strings.Builder
+	
+	// Simple compact preview with terminal size hint
+	b.WriteString("═══ PREVIEW ═══\n")
+	b.WriteString("💡 Tip: Stretch terminal for better UI\n")
+	
+	if m.title != "" {
+		b.WriteString(fmt.Sprintf("📋 %s\n", m.title))
+	}
+	
+	if m.project != "" {
+		b.WriteString(fmt.Sprintf("📁 %s\n", m.project))
+	}
+	
+	if len(m.tags) > 0 {
+		b.WriteString(fmt.Sprintf("🔖 %s\n", strings.Join(m.tags, ", ")))
+	}
+	
+	if m.priority != "" {
+		b.WriteString(fmt.Sprintf("⚡ %s\n", parser.NormalizePriority(m.priority)))
+	}
+	
+	if m.jiraID != "" {
+		b.WriteString(fmt.Sprintf("🎫 %s\n", m.jiraID))
+	}
+	
+	if m.dueDate != "" {
+		parsedDate, err := parser.ParseDueDate(m.dueDate)
+		if err == nil && parsedDate != nil {
+			b.WriteString(fmt.Sprintf("📅 %s\n", parser.FormatDueDate(parsedDate)))
+		} else {
+			b.WriteString(fmt.Sprintf("📅 %s\n", m.dueDate))
+		}
+	}
+	
+	if m.notes != "" {
+		b.WriteString(fmt.Sprintf("📝 %s\n", m.notes))
+	}
+	
+	b.WriteString("═══════════════\n")
+	return b.String()
+}
+
+// renderSmallLayout renders entire TUI for very small terminals
+func (m AddTaskModel) renderSmallLayout() string {
+	// Single column layout for small terminals
+	style := lipgloss.NewStyle().
+		Width(m.width - 2).
+		Height(m.height - 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorBorder)).
+		Padding(1)
+	
+	// Wizard content (already has logo at top)
+	wizard := m.renderWizard()
+	
+	// Small preview
+	preview := m.renderSmallPreview()
+	
+	// Combine vertically
+	content := wizard + "\n" + preview
+	
+	return style.Render(content)
 }
 
 // handleEnter processes the Enter key
