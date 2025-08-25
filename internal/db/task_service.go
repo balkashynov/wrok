@@ -114,16 +114,109 @@ func findOrCreateTags(tagNames []string) ([]models.Tag, error) {
 	return tags, nil
 }
 
-// GetTasks retrieves tasks with optional filters
+// TaskQueryOptions holds options for querying tasks
+type TaskQueryOptions struct {
+	Status    string   // Filter by status
+	Project   string   // Filter by project
+	Tags      []string // Filter by tags (AND logic)
+	JiraID    string   // Filter by JIRA ID
+	Priority  string   // Filter by priority (low/medium/high)
+	OrderBy   string   // Order by clause (e.g., "id DESC", "created_at ASC")
+	Limit     int      // Limit results
+	Offset    int      // Offset for pagination
+}
+
+// GetTasks retrieves all tasks (legacy function for backward compatibility)
 func GetTasks() ([]models.Task, error) {
+	opts := TaskQueryOptions{
+		OrderBy: "id DESC", // Default order
+	}
+	return GetTasksWithOptions(opts)
+}
+
+// GetTasksWithOptions retrieves tasks with filtering and sorting options
+func GetTasksWithOptions(opts TaskQueryOptions) ([]models.Task, error) {
 	var tasks []models.Task
 	
-	// Preload tags relationship
-	if err := DB.Preload("Tags").Find(&tasks).Error; err != nil {
+	// Start with base query, preload tags
+	query := DB.Preload("Tags")
+	
+	// Apply filters
+	if opts.Status != "" {
+		query = query.Where("status = ?", opts.Status)
+	}
+	
+	if opts.Project != "" {
+		query = query.Where("project LIKE ?", "%"+opts.Project+"%")
+	}
+	
+	if opts.JiraID != "" {
+		query = query.Where("jira_id LIKE ?", "%"+opts.JiraID+"%")
+	}
+	
+	if opts.Priority != "" {
+		// Convert priority string to int
+		var priorityInt int
+		switch strings.ToLower(opts.Priority) {
+		case "low", "1":
+			priorityInt = 1
+		case "medium", "med", "2":
+			priorityInt = 2
+		case "high", "3":
+			priorityInt = 3
+		default:
+			priorityInt = 0 // No priority
+		}
+		query = query.Where("priority = ?", priorityInt)
+	}
+	
+	// Filter by tags (AND logic - task must have all specified tags)
+	if len(opts.Tags) > 0 {
+		// Use subquery to find tasks that have all specified tags
+		for _, tag := range opts.Tags {
+			query = query.Where("id IN (?)", 
+				DB.Table("task_tags").
+					Select("task_id").
+					Joins("JOIN tags ON task_tags.tag_id = tags.id").
+					Where("tags.name LIKE ?", "%"+tag+"%"))
+		}
+	}
+	
+	// Apply ordering
+	if opts.OrderBy != "" {
+		query = query.Order(opts.OrderBy)
+	}
+	
+	// Apply pagination
+	if opts.Limit > 0 {
+		query = query.Limit(opts.Limit)
+	}
+	if opts.Offset > 0 {
+		query = query.Offset(opts.Offset)
+	}
+	
+	// Execute query
+	if err := query.Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	
 	return tasks, nil
+}
+
+
+// GetActiveTask returns the currently active (tracking time) task
+func GetActiveTask() (*models.Task, error) {
+	// Find the task with an active session
+	var session models.Session
+	if err := DB.Where("end_time IS NULL").First(&session).Error; err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil // No active task
+		}
+		return nil, err
+	}
+	
+	// Get the task for this session
+	return GetTaskByID(session.TaskID)
 }
 
 // MarkTaskDone marks a task as completed and stops any active session
