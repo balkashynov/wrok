@@ -321,29 +321,63 @@ func (m ListModel) renderTaskTable(width int) string {
 	columnHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(ColorAccentBright)).
-		Padding(0, 1)
+		PaddingLeft(2)
+		// Adjusted left padding for perfect alignment
 	
-	// Calculate column widths for the available space (subtract borders and padding)
+	// Calculate fixed widths for right-aligned columns
 	availableWidth := width - 4 // Account for borders
 	idWidth := 4
-	statusWidth := 8  // Increased for "✓ done"
-	dueWidth := 10    // Keep at 10 for "TOMORROW"/"OVERDUE"
-	titleWidth := availableWidth - idWidth - statusWidth - dueWidth - 6 // Account for spacing between columns
+	statusWidth := 8     // For "✓ done" / "○ todo"
+	priorityWidth := 8   // For "high" / "med" / "low" / "-"
+	jiraWidth := 9       // For "ABC-123" / "-" - reduced to 9 chars max
+	dueWidth := 9        // For "TOMORROW" / "OVERDUE"
 	
-	// Ensure minimum widths
-	if titleWidth < 20 {
-		titleWidth = 20
-	}
-	if dueWidth < 10 {
-		dueWidth = 10
+	// Responsive layout: hide priority, jira, due when terminal < 105 chars
+	// The 'width' here is the left panel width (60% of terminal)
+	// For 105px terminal breakpoint: 105 * 0.6 ≈ 63px table width
+	showExtraColumns := width >= 63
+	
+	var headerLeft, headerRight string
+	var rightSideWidth int
+	var titleWidth int // Declare titleWidth at proper scope
+	
+	if showExtraColumns {
+		// Full layout with all columns
+		rightSideWidth = statusWidth + priorityWidth + jiraWidth + dueWidth + 3 // +3 for single spaces between 4 columns
+		titleWidth = availableWidth - idWidth - rightSideWidth - 2 // -2 for spacing around title
+		
+		// Ensure minimum widths
+		if titleWidth < 15 {
+			titleWidth = 15
+		}
+		
+		headerLeft = fmt.Sprintf("%-*s %-*s", idWidth, "ID", titleWidth, "TITLE")
+		headerRight = fmt.Sprintf("%-*s %-*s %-*s %-*s", 
+			statusWidth, "STATUS",
+			priorityWidth, "PRIORITY",
+			jiraWidth, "JIRA",
+			dueWidth, "DUE")
+	} else {
+		// Compact layout: only ID, TITLE, STATUS
+		rightSideWidth = statusWidth
+		titleWidth = availableWidth - idWidth - rightSideWidth - 2 // -2 for spacing around title
+		
+		// Ensure minimum widths
+		if titleWidth < 20 {
+			titleWidth = 20 // More space for title in compact mode
+		}
+		
+		headerLeft = fmt.Sprintf("%-*s %-*s", idWidth, "ID", titleWidth, "TITLE")
+		headerRight = fmt.Sprintf("%-*s", statusWidth, "STATUS")
 	}
 	
-	// Column headers - simple, no borders
-	headers := fmt.Sprintf("%-*s %-*s %-*s %-*s", 
-		idWidth, "ID",
-		titleWidth, "TITLE", 
-		statusWidth, "STATUS",
-		dueWidth, "DUE")
+	// Calculate spacing to push right side to the right
+	spacingNeeded := availableWidth - len(headerLeft) - len(headerRight)
+	if spacingNeeded < 1 {
+		spacingNeeded = 1
+	}
+	
+	headers := headerLeft + strings.Repeat(" ", spacingNeeded) + headerRight
 	b.WriteString(columnHeaderStyle.Render(headers))
 	b.WriteString("\n\n")
 	
@@ -359,19 +393,17 @@ func (m ListModel) renderTaskTable(width int) string {
 		// Format columns
 		id := fmt.Sprintf("#%d", task.ID)
 		
-		title := task.Title
-		if len(title) > titleWidth-1 {
-			if titleWidth > 4 {
-				title = title[:titleWidth-4] + "..."
+		// Truncate ID if too long
+		if len(id) > idWidth {
+			if idWidth > 3 {
+				id = id[:idWidth-3] + "..."
 			} else {
-				title = title[:titleWidth-1]
+				id = id[:idWidth]
 			}
 		}
 		
-		// Apply shimmer to selected task title
-		if isSelected {
-			title = m.shimmer.RenderShimmerText(title, titleWidth)
-		}
+		title := task.Title
+		// Title truncation and shimmer will be applied later
 		
 		// Format status text (always plain text for consistent column alignment)
 		var statusText string
@@ -401,13 +433,56 @@ func (m ListModel) renderTaskTable(width int) string {
 			dueText = "-"
 		}
 		
-		// Ensure due text fits in column
-		if len(dueText) > dueWidth {
-			if dueWidth > 3 {
-				dueText = dueText[:dueWidth-3] + "..."
-			} else {
-				dueText = dueText[:dueWidth]
+		// Format and color priority
+		var priorityText, coloredPriorityText string
+		if task.Priority > 0 && task.Priority <= 3 {
+			priorities := []string{"", "low", "med", "high"}
+			priorityText = priorities[task.Priority]
+			
+			// Color coding: high=red, med=yellow, low=dim
+			switch task.Priority {
+			case 3: // high
+				coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(priorityText)
+			case 2: // medium
+				coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(priorityText)
+			case 1: // low
+				coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(priorityText)
 			}
+		} else {
+			priorityText = "-"
+			coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(priorityText)
+		}
+		
+		// Format and color JIRA - ensure consistent styling
+		var jiraText, coloredJiraText string
+		if task.JiraID != "" {
+			jiraText = task.JiraID
+			// Apply consistent purple color to entire JIRA ID
+			coloredJiraText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentMain)).Bold(true).Render(jiraText)
+		} else {
+			jiraText = "-"
+			coloredJiraText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(jiraText)
+		}
+		
+		// Apply truncation AFTER creating colored versions to avoid overwriting
+		// This will be done after the color assignments
+		
+		// TITLE: More conservative truncation to prevent layout breaking
+		// Truncate to a safe maximum that won't overflow
+		maxTitleLen := titleWidth - 2 // Leave some buffer to prevent overflow
+		if maxTitleLen < 10 {
+			maxTitleLen = 10 // Minimum reasonable title length
+		}
+		
+		if !isSelected && len(title) > maxTitleLen {
+			title = title[:maxTitleLen-3] + "..."
+		} else if isSelected {
+			// For selected items, truncate the original title first, then apply shimmer
+			originalTitle := task.Title
+			if len(originalTitle) > maxTitleLen {
+				originalTitle = originalTitle[:maxTitleLen-3] + "..."
+			}
+			title = m.shimmer.RenderShimmerText(originalTitle, titleWidth)
 		}
 		
 		// Apply colors to status and due date
@@ -437,22 +512,323 @@ func (m ListModel) renderTaskTable(width int) string {
 			coloredDueText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(dueText)
 		}
 		
-		// Create row content
-		rowContent := fmt.Sprintf("%-*s %-*s %-*s %-*s", 
-			idWidth, id,
-			titleWidth, title,
-			statusWidth, coloredStatusText,
-			dueWidth, coloredDueText)
+		// NOW apply truncation to all fields (after colors are applied)
+		
+		// ID: 4 chars max
+		if len(id) > 4 {
+			id = id[:1] + "..."
+		}
+		
+		// DUE: 9 chars max
+		if len(dueText) > 9 {
+			dueText = dueText[:6] + "..."
+			// Re-apply color after truncation
+			if task.Due != nil {
+				now := time.Now()
+				days := int(task.Due.Sub(now).Hours() / 24)
+				if days < 0 {
+					coloredDueText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(dueText)
+				} else if days == 0 {
+					coloredDueText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(dueText)
+				} else if days == 1 {
+					coloredDueText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(dueText)
+				} else if days <= 7 {
+					coloredDueText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright)).Render(dueText)
+				} else {
+					coloredDueText = dueText // No special color for far dates
+				}
+			} else {
+				coloredDueText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(dueText)
+			}
+		}
+		
+		// JIRA: 9 chars max (as requested)
+		if len(jiraText) > 9 {
+			jiraText = jiraText[:6] + "..."
+			// Re-apply color after truncation
+			if task.JiraID != "" {
+				coloredJiraText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentMain)).Bold(true).Render(jiraText)
+			} else {
+				coloredJiraText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(jiraText)
+			}
+		}
+		
+		// PRIORITY: 8 chars max
+		if len(priorityText) > 8 {
+			priorityText = priorityText[:5] + "..."
+			// Re-apply color after truncation
+			if task.Priority > 0 && task.Priority <= 3 {
+				switch task.Priority {
+				case 3: // high
+					coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(priorityText)
+				case 2: // medium
+					coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(priorityText)
+				case 1: // low
+					coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(priorityText)
+				}
+			} else {
+				coloredPriorityText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(priorityText)
+			}
+		}
+		
+		// STATUS: 8 chars max
+		if len(statusText) > 8 {
+			statusText = statusText[:5] + "..."
+			// Re-apply color after truncation
+			if task.Status == "done" {
+				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess)).Render(statusText)
+			} else {
+				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(statusText)
+			}
+		}
+		
+		// Create row content with exact column alignment (responsive)
+		// Add extra spaces to align values with headers
+		rowLeft := fmt.Sprintf(" %-*s %-*s", idWidth, id, titleWidth, title)  // Added leading space
+		
+		var rowRight string
+		if showExtraColumns {
+			// Full layout
+			rowRight = fmt.Sprintf("%-*s %-*s %-*s %-*s", 
+				statusWidth, statusText,
+				priorityWidth, priorityText,
+				jiraWidth, jiraText,
+				dueWidth, dueText)
+		} else {
+			// Compact layout: only status
+			rowRight = fmt.Sprintf("%-*s", statusWidth, statusText)
+		}
+		
+		// Calculate spacing to align right side (account for the extra space we added)
+		spacingNeeded := availableWidth - len(rowLeft) - len(rowRight)
+		if spacingNeeded < 1 {
+			spacingNeeded = 1
+		}
+		
+		// Combine with spacing
+		plainRowContent := rowLeft + strings.Repeat(" ", spacingNeeded) + rowRight
+		
+		// Replace plain text with colored versions (responsive)
+		rowContent := plainRowContent
+		rowContent = strings.Replace(rowContent, statusText, coloredStatusText, 1)
+		if showExtraColumns {
+			// Only apply these replacements if columns are shown
+			rowContent = strings.Replace(rowContent, priorityText, coloredPriorityText, 1)
+			rowContent = strings.Replace(rowContent, jiraText, coloredJiraText, 1)
+			rowContent = strings.Replace(rowContent, dueText, coloredDueText, 1)
+		}
 		
 		if isSelected {
-			// Selected row: use shining purple border
+			// Selected row: custom text with ID, title, and non-null fields
+			var customParts []string
+			
+			// Build parts with proper styling
+			customParts = append(customParts, id)
+			
+			// Add title with shimmer effect (give it plenty of width)
+			shimmeredTitle := m.shimmer.RenderShimmerText(task.Title, len(task.Title)+20) // Extra width for shimmer effect
+			customParts = append(customParts, shimmeredTitle)
+			
+			// Add priority with same colors as table
+			if task.Priority > 0 && task.Priority <= 3 {
+				priorities := []string{"", "low", "med", "high"}
+				priorityText := priorities[task.Priority]
+				
+				// Apply same color coding as table
+				var coloredPriority string
+				switch task.Priority {
+				case 3: // high
+					coloredPriority = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(priorityText)
+				case 2: // medium
+					coloredPriority = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(priorityText)
+				case 1: // low
+					coloredPriority = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(priorityText)
+				}
+				customParts = append(customParts, coloredPriority)
+			}
+			
+			// Add JIRA with same color as table
+			if task.JiraID != "" {
+				coloredJira := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentMain)).Bold(true).Render(task.JiraID)
+				customParts = append(customParts, coloredJira)
+			}
+			
+			// Add due date with same colors as table
+			if task.Due != nil {
+				now := time.Now()
+				days := int(task.Due.Sub(now).Hours() / 24)
+				var dueDisplay string
+				var coloredDue string
+				
+				if days < 0 {
+					dueDisplay = "OVERDUE"
+					coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(dueDisplay)
+				} else if days == 0 {
+					dueDisplay = "TODAY"
+					coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(dueDisplay)
+				} else if days == 1 {
+					dueDisplay = "TOMORROW"
+					coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(dueDisplay)
+				} else if days <= 7 {
+					dueDisplay = fmt.Sprintf("%dd", days)
+					coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright)).Render(dueDisplay)
+				} else {
+					dueDisplay = task.Due.Format("02/01")
+					coloredDue = dueDisplay // No special color for far dates
+				}
+				customParts = append(customParts, coloredDue)
+			}
+			
+			// Smart truncation: JIRA first, then title
+			maxWidth := availableWidth - 4 // Account for border + padding
+			
+			// Helper function to calculate visual length (without ANSI codes)
+			visualLength := func(text string) int {
+				// Count visible characters by removing ANSI escape sequences
+				visibleLen := 0
+				inEscape := false
+				for _, r := range text {
+					if r == '\033' { // ESC character
+						inEscape = true
+					} else if inEscape && r == 'm' {
+						inEscape = false
+					} else if !inEscape {
+						visibleLen++
+					}
+				}
+				return visibleLen
+			}
+			
+			// Try different truncation strategies
+			customText := ""
+			
+			// Strategy 1: No truncation
+			customText = strings.Join(customParts, "   ")
+			if visualLength(customText) <= maxWidth {
+				// Perfect fit, done
+			} else if task.JiraID != "" && len(task.JiraID) > 9 {
+				// Strategy 2: Truncate JIRA first
+				truncatedJira := task.JiraID[:6] + "..."
+				truncatedParts := make([]string, 0)
+				
+				// Rebuild parts with truncated JIRA (with styling)
+				truncatedParts = append(truncatedParts, id)
+				
+				// Add shimmered title
+				shimmeredTitle := m.shimmer.RenderShimmerText(task.Title, len(task.Title)+20)
+				truncatedParts = append(truncatedParts, shimmeredTitle)
+				
+				if task.Priority > 0 && task.Priority <= 3 {
+					priorities := []string{"", "low", "med", "high"}
+					priorityText := priorities[task.Priority]
+					
+					// Apply same color coding
+					var coloredPriority string
+					switch task.Priority {
+					case 3: // high
+						coloredPriority = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(priorityText)
+					case 2: // medium
+						coloredPriority = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(priorityText)
+					case 1: // low
+						coloredPriority = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(priorityText)
+					}
+					truncatedParts = append(truncatedParts, coloredPriority)
+				}
+				
+				// Add styled truncated JIRA
+				coloredTruncatedJira := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentMain)).Bold(true).Render(truncatedJira)
+				truncatedParts = append(truncatedParts, coloredTruncatedJira)
+				
+				if task.Due != nil {
+					now := time.Now()
+					days := int(task.Due.Sub(now).Hours() / 24)
+					var dueDisplay string
+					var coloredDue string
+					
+					if days < 0 {
+						dueDisplay = "OVERDUE"
+						coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorError)).Render(dueDisplay)
+					} else if days == 0 {
+						dueDisplay = "TODAY"
+						coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(dueDisplay)
+					} else if days == 1 {
+						dueDisplay = "TOMORROW"
+						coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(dueDisplay)
+					} else if days <= 7 {
+						dueDisplay = fmt.Sprintf("%dd", days)
+						coloredDue = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright)).Render(dueDisplay)
+					} else {
+						dueDisplay = task.Due.Format("02/01")
+						coloredDue = dueDisplay // No special color for far dates
+					}
+					truncatedParts = append(truncatedParts, coloredDue)
+				}
+				
+				customText = strings.Join(truncatedParts, "   ")
+				if visualLength(customText) > maxWidth {
+					// Strategy 3: Truncate title too
+					overflow := visualLength(customText) - maxWidth + 3 // +3 for "..."
+					if len(task.Title) > overflow + 10 { // Keep at least 10 chars
+						truncatedTitle := task.Title[:len(task.Title)-overflow] + "..."
+						truncatedParts[1] = truncatedTitle // Title is at index 1
+						customText = strings.Join(truncatedParts, "   ")
+					} else {
+						// Fallback: truncate entire string
+						customText = customText[:maxWidth-3] + "..."
+					}
+				}
+			} else {
+				// Strategy 3: No JIRA to truncate, truncate title directly
+				overflow := visualLength(customText) - maxWidth + 3 // +3 for "..."
+				if len(task.Title) > overflow + 10 { // Keep at least 10 chars
+					truncatedTitle := task.Title[:len(task.Title)-overflow] + "..."
+					truncatedParts := make([]string, 0)
+					
+					// Rebuild with truncated title
+					truncatedParts = append(truncatedParts, id)
+					truncatedParts = append(truncatedParts, truncatedTitle)
+					
+					if task.Priority > 0 && task.Priority <= 3 {
+						priorities := []string{"", "low", "med", "high"}
+						truncatedParts = append(truncatedParts, priorities[task.Priority])
+					}
+					
+					if task.JiraID != "" {
+						truncatedParts = append(truncatedParts, task.JiraID)
+					}
+					
+					if task.Due != nil {
+						now := time.Now()
+						days := int(task.Due.Sub(now).Hours() / 24)
+						var dueDisplay string
+						if days < 0 {
+							dueDisplay = "OVERDUE"
+						} else if days == 0 {
+							dueDisplay = "TODAY"
+						} else if days == 1 {
+							dueDisplay = "TOMORROW"
+						} else if days <= 7 {
+							dueDisplay = fmt.Sprintf("%dd", days)
+						} else {
+							dueDisplay = task.Due.Format("02/01")
+						}
+						truncatedParts = append(truncatedParts, dueDisplay)
+					}
+					
+					customText = strings.Join(truncatedParts, "   ")
+				} else {
+					// Fallback: truncate entire string
+					customText = customText[:maxWidth-3] + "..."
+				}
+			}
+			
 			shimmerBorder := lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color(ColorAccentMain)).
 				Bold(true).
 				Padding(0, 1)
 			
-			b.WriteString(shimmerBorder.Render(rowContent))
+			b.WriteString(shimmerBorder.Render(customText))
 		} else {
 			// Regular row: no borders, just content
 			b.WriteString(" " + rowContent)
