@@ -256,12 +256,13 @@ func (m ListModel) View() string {
 	// Calculate layout
 	leftWidth := m.width * 60 / 100  // 60% for table
 	rightWidth := m.width - leftWidth - 1 // Rest for details
+	contentHeight := m.height - 6 // Reserve space for search/help bar
 	
 	// Left panel: Task table
 	leftPanel := m.renderTaskTable(leftWidth)
 	
 	// Right panel: Task details
-	rightPanel := m.renderTaskDetails(rightWidth)
+	rightPanel := m.renderTaskDetails(rightWidth, contentHeight)
 	
 	// Main content
 	content := lipgloss.JoinHorizontal(
@@ -863,118 +864,497 @@ func (m ListModel) renderTaskTable(width int) string {
 	return outerBorderStyle.Render(b.String())
 }
 
-// renderTaskDetails renders the right panel with task details
-func (m ListModel) renderTaskDetails(width int) string {
+// renderTaskDetails renders the right panel with task details in purple box style
+func (m ListModel) renderTaskDetails(width, height int) string {
 	var b strings.Builder
 	
+	// Handle narrow terminals (< 110px total width) or short terminals (< 35px height) with simpler design
+	if m.width < 110 || m.height < 35 {
+		return m.renderNarrowTaskDetails(width, height)
+	}
+	
 	if len(m.tasks) == 0 || m.selectedTask >= len(m.tasks) {
-		// Empty state with logo
+		// Empty state - center vertically with logo
+		availableHeight := height - 4
+		verticalPadding := availableHeight / 3
+		if verticalPadding > 5 {
+			verticalPadding = 5
+		}
+		
+		// Add vertical spacing
+		for i := 0; i < verticalPadding; i++ {
+			b.WriteString("\n")
+		}
+		
+		// ASCII logo
+		logoLines := []string{
+			"██╗    ██╗██████╗  ██████╗ ██╗  ██╗",
+			"██║    ██║██╔══██╗██╔═══██╗██║ ██╔╝", 
+			"██║ █╗ ██║██████╔╝██║   ██║█████╔╝ ",
+			"██║███╗██║██╔══██╗██║   ██║██╔═██╗ ",
+			"╚███╔███╔╝██║  ██║╚██████╔╝██║  ██╗",
+			" ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝",
+		}
+		
 		logoStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ColorAccentMain)).
 			Bold(true).
 			Align(lipgloss.Center).
-			Width(width)
-		b.WriteString(logoStyle.Render("wrok"))
+			Width(width-8)
+		
+		b.WriteString(logoStyle.Render(strings.Join(logoLines, "\n")))
+		b.WriteString("\n\n")
 		
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ColorSecondaryText)).
 			Italic(true).
 			Align(lipgloss.Center).
-			Width(width).
-			MarginTop(2)
-		b.WriteString("\n")
+			Width(width-8)
 		b.WriteString(emptyStyle.Render("Select a task to view details"))
+		
 	} else {
-		// Show selected task details
+		// Selected task - show details with some top padding
 		task := m.tasks[m.selectedTask]
 		
-		// Title
+		b.WriteString("\n")
+		
+		// ASCII logo at top
+		logoLines := []string{
+			"██╗    ██╗██████╗  ██████╗ ██╗  ██╗",
+			"██║    ██║██╔══██╗██╔═══██╗██║ ██╔╝", 
+			"██║ █╗ ██║██████╔╝██║   ██║█████╔╝ ",
+			"██║███╗██║██╔══██╗██║   ██║██╔═██╗ ",
+			"╚███╔███╔╝██║  ██║╚██████╔╝██║  ██╗",
+			" ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝",
+		}
+		
+		logoStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorAccentMain)).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(width-8)
+		
+		b.WriteString(logoStyle.Render(strings.Join(logoLines, "\n")))
+		b.WriteString("\n\n")
+		
+		// Separator line
+		separatorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorBorder)).
+			Align(lipgloss.Center).
+			Width(width-8)
+		separatorLine := strings.Repeat("─", min(width-12, 40))
+		b.WriteString(separatorStyle.Render(separatorLine))
+		b.WriteString("\n\n")
+		
+		// Title in bordered box
 		titleStyle := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color(ColorPrimaryText)).
-			Width(width)
-		b.WriteString(titleStyle.Render("📋 " + task.Title))
+			Align(lipgloss.Center).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ColorAccentMain)).
+			Width(width-12).
+			Padding(0, 1)
+		b.WriteString(titleStyle.Render(task.Title))
 		b.WriteString("\n\n")
 		
-		// Status
+		// Task details in structured format
+		// Status with emoji
+		statusIcon := "○"
 		statusColor := ColorSecondaryText
+		statusText := "todo"
 		if task.Status == "done" {
+			statusIcon = "✅"
 			statusColor = ColorSuccess
+			statusText = "done"
 		}
+		
 		statusStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(statusColor)).
-			Bold(true)
-		b.WriteString("Status: ")
-		b.WriteString(statusStyle.Render(task.Status))
+			Align(lipgloss.Center).
+			Width(width-8)
+		statusLine := fmt.Sprintf("%s Status: %s", statusIcon, 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Bold(true).Render(statusText))
+		b.WriteString(statusStyle.Render(statusLine))
 		b.WriteString("\n")
 		
-		// Project
+		// Project with emoji
+		projectStyle := lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Width(width-8)
+		projectValue := "none"
+		projectColor := ColorDisabledText
 		if task.Project != "" {
-			b.WriteString("Project: ")
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright)).Render(task.Project))
-			b.WriteString("\n")
+			projectValue = task.Project
+			projectColor = ColorAccentBright
 		}
+		projectLine := fmt.Sprintf("📁 Project: %s", 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(projectColor)).Render(projectValue))
+		b.WriteString(projectStyle.Render(projectLine))
+		b.WriteString("\n")
 		
-		// Priority
-		if task.Priority > 0 {
+		// Priority with emoji
+		priorityStyle := lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Width(width-8)
+		priorityIcon := "⚪"
+		priorityValue := "none"
+		priorityColor := ColorDisabledText
+		if task.Priority > 0 && task.Priority <= 3 {
 			priorities := []string{"", "low", "medium", "high"}
-			priorityStr := priorities[task.Priority]
-			priorityColor := ColorSecondaryText
-			if task.Priority == 3 {
+			priorityValue = priorities[task.Priority]
+			switch task.Priority {
+			case 3:
+				priorityIcon = "🔴"
 				priorityColor = ColorError
-			} else if task.Priority == 2 {
+			case 2:
+				priorityIcon = "🟡"
 				priorityColor = ColorWarning
+			case 1:
+				priorityIcon = "🟢"
+				priorityColor = ColorSecondaryText
 			}
-			b.WriteString("Priority: ")
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(priorityColor)).Render(priorityStr))
-			b.WriteString("\n")
 		}
+		priorityLine := fmt.Sprintf("%s Priority: %s", priorityIcon, 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(priorityColor)).Bold(true).Render(priorityValue))
+		b.WriteString(priorityStyle.Render(priorityLine))
+		b.WriteString("\n")
 		
-		// Tags
+		// Tags with emoji
+		tagsStyle := lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Width(width-8)
+		tagsValue := "none"
+		tagsColor := ColorDisabledText
 		if len(task.Tags) > 0 {
 			var tagNames []string
 			for _, tag := range task.Tags {
-				tagNames = append(tagNames, tag.Name)
+				tagNames = append(tagNames, "#"+tag.Name)
 			}
-			b.WriteString("Tags: ")
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright)).Render(strings.Join(tagNames, ", ")))
-			b.WriteString("\n")
+			tagsValue = strings.Join(tagNames, " ")
+			tagsColor = ColorAccentBright
 		}
+		tagsLine := fmt.Sprintf("🔖  Tags: %s", 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(tagsColor)).Render(tagsValue))
+		b.WriteString(tagsStyle.Render(tagsLine))
+		b.WriteString("\n")
 		
-		// JIRA
+		// JIRA with emoji
+		jiraStyle := lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Width(width-8)
+		jiraValue := "none"
+		jiraColor := ColorDisabledText
 		if task.JiraID != "" {
-			b.WriteString("JIRA: ")
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentMain)).Render(task.JiraID))
-			b.WriteString("\n")
+			jiraValue = task.JiraID
+			jiraColor = ColorAccentMain
 		}
+		jiraLine := fmt.Sprintf("🎯 JIRA: %s", 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(jiraColor)).Bold(true).Render(jiraValue))
+		b.WriteString(jiraStyle.Render(jiraLine))
+		b.WriteString("\n")
 		
-		// Due date
+		// Due date with emoji
+		dueStyle := lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Width(width-8)
+		dueIcon := "📅"
+		dueValue := "none"
+		dueColor := ColorDisabledText
 		if task.Due != nil {
-			b.WriteString("Due: ")
-			// TODO: Format due date nicely
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWarning)).Render(task.Due.Format("02/01/2006")))
-			b.WriteString("\n")
+			now := time.Now()
+			days := int(task.Due.Sub(now).Hours() / 24)
+			
+			if days < 0 {
+				dueIcon = "⚠️"
+				dueValue = fmt.Sprintf("OVERDUE (%s)", task.Due.Format("02/01/2006"))
+				dueColor = ColorError
+			} else if days == 0 {
+				dueIcon = "🚨"
+				dueValue = fmt.Sprintf("TODAY (%s)", task.Due.Format("02/01/2006"))
+				dueColor = ColorWarning
+			} else if days == 1 {
+				dueIcon = "📅"
+				dueValue = fmt.Sprintf("TOMORROW (%s)", task.Due.Format("02/01/2006"))
+				dueColor = ColorWarning
+			} else if days <= 7 {
+				dueIcon = "📅"
+				dueValue = fmt.Sprintf("in %d days (%s)", days, task.Due.Format("02/01/2006"))
+				dueColor = ColorAccentBright
+			} else {
+				dueIcon = "📅"
+				dueValue = task.Due.Format("02/01/2006")
+				dueColor = ColorSecondaryText
+			}
 		}
+		dueLine := fmt.Sprintf("%s Due: %s", dueIcon, 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(dueColor)).Bold(true).Render(dueValue))
+		b.WriteString(dueStyle.Render(dueLine))
+		b.WriteString("\n\n")
 		
-		// Notes
+		// Notes section with emoji
+		notesStyle := lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Width(width-8)
+		b.WriteString(notesStyle.Render("📝 Notes:"))
+		b.WriteString("\n")
+		
 		if task.Note != "" {
-			b.WriteString("\nNotes:\n")
 			noteStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color(ColorSecondaryText)).
-				Italic(true).
-				Width(width - 2)
+				Width(width - 12).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color(ColorBorder)).
+				Align(lipgloss.Left).
+				Padding(1, 2)
 			b.WriteString(noteStyle.Render(task.Note))
+		} else {
+			emptyNoteStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorDisabledText)).
+				Italic(true).
+				Width(width - 12).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color(ColorBorder)).
+				Align(lipgloss.Center).
+				Padding(1, 2)
+			b.WriteString(emptyNoteStyle.Render("No notes"))
 		}
+		
+		// Timestamps at bottom
+		b.WriteString("\n\n")
+		timestampStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorHelpText)).
+			Align(lipgloss.Center).
+			Width(width-8)
+		timestamps := fmt.Sprintf("Created: %s • Updated: %s", 
+			task.CreatedAt.Format("02/01 15:04"), 
+			task.UpdatedAt.Format("02/01 15:04"))
+		b.WriteString(timestampStyle.Render(timestamps))
 	}
 	
-	// Apply border
-	borderStyle := lipgloss.NewStyle().
+	// Apply full-width purple border with space for the border
+	purpleBoxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorBorder)).
-		Width(width)
-		// Remove fixed height to let content determine size
+		BorderForeground(lipgloss.Color(ColorAccentMain)).
+		Width(width - 4).  // Leave more space for the right border
+		Padding(1, 2)
 	
-	return borderStyle.Render(b.String())
+	return purpleBoxStyle.Render(b.String())
+}
+
+// renderNarrowTaskDetails renders a compact view for narrow terminals (< 110px)
+func (m ListModel) renderNarrowTaskDetails(width, height int) string {
+	var b strings.Builder
+	
+	if len(m.tasks) == 0 || m.selectedTask >= len(m.tasks) {
+		// Empty state for narrow terminals
+		availableHeight := height - 4
+		verticalPadding := availableHeight / 3
+		if verticalPadding > 3 {
+			verticalPadding = 3
+		}
+		
+		// Add vertical spacing
+		for i := 0; i < verticalPadding; i++ {
+			b.WriteString("\n")
+		}
+		
+		// Simple compact logo
+		compactLogoStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorAccentMain)).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(width-8)
+		
+		b.WriteString(compactLogoStyle.Render("◈ WROK ◈"))
+		b.WriteString("\n\n")
+		
+		// Tip message
+		tipStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorSecondaryText)).
+			Italic(true).
+			Align(lipgloss.Center).
+			Width(width-8)
+		b.WriteString(tipStyle.Render("💡 Stretch terminal"))
+		b.WriteString("\n")
+		b.WriteString(tipStyle.Render("for better experience"))
+		
+	} else {
+		// Selected task - compact view
+		task := m.tasks[m.selectedTask]
+		
+		b.WriteString("\n")
+		
+		// Simple compact header
+		headerStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorAccentMain)).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(width-8)
+		
+		b.WriteString(headerStyle.Render("◈ TASK DETAILS ◈"))
+		b.WriteString("\n\n")
+		
+		// Task title - compact
+		titleStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color(ColorPrimaryText)).
+			Align(lipgloss.Center).
+			Width(width-8)
+		
+		// Truncate title if too long for narrow view
+		title := task.Title
+		if len(title) > width-12 {
+			title = title[:width-15] + "..."
+		}
+		b.WriteString(titleStyle.Render(title))
+		b.WriteString("\n\n")
+		
+		// Compact field display - vertical layout
+		fieldStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorSecondaryText)).
+			Width(width-8)
+		
+		// Status
+		statusIcon := "○"
+		statusColor := ColorSecondaryText
+		if task.Status == "done" {
+			statusIcon = "✓"
+			statusColor = ColorSuccess
+		}
+		statusLine := fmt.Sprintf("%s %s", statusIcon, 
+			lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Bold(true).Render(task.Status))
+		b.WriteString(fieldStyle.Render(statusLine))
+		b.WriteString("\n")
+		
+		// Project (if exists)
+		if task.Project != "" {
+			projectLine := fmt.Sprintf("📁 %s", task.Project)
+			if len(projectLine) > width-10 {
+				projectLine = projectLine[:width-13] + "..."
+			}
+			b.WriteString(fieldStyle.Render(projectLine))
+			b.WriteString("\n")
+		}
+		
+		// Priority (if exists)
+		if task.Priority > 0 && task.Priority <= 3 {
+			priorities := []string{"", "low", "med", "high"}
+			priorityText := priorities[task.Priority]
+			var priorityColor string
+			var priorityIcon string
+			switch task.Priority {
+			case 3:
+				priorityIcon = "🔴"
+				priorityColor = ColorError
+			case 2:
+				priorityIcon = "🟡"
+				priorityColor = ColorWarning
+			case 1:
+				priorityIcon = "🟢"
+				priorityColor = ColorSecondaryText
+			}
+			priorityLine := fmt.Sprintf("%s %s", priorityIcon, 
+				lipgloss.NewStyle().Foreground(lipgloss.Color(priorityColor)).Bold(true).Render(priorityText))
+			b.WriteString(fieldStyle.Render(priorityLine))
+			b.WriteString("\n")
+		}
+		
+		// Tags (if exist)
+		if len(task.Tags) > 0 {
+			var tagNames []string
+			for _, tag := range task.Tags {
+				tagNames = append(tagNames, "#"+tag.Name)
+			}
+			tagsText := strings.Join(tagNames, " ")
+			if len(tagsText) > width-12 {
+				tagsText = tagsText[:width-15] + "..."
+			}
+			tagsLine := fmt.Sprintf("🔖 %s", tagsText)
+			b.WriteString(fieldStyle.Render(tagsLine))
+			b.WriteString("\n")
+		}
+		
+		// JIRA (if exists)
+		if task.JiraID != "" {
+			jiraLine := fmt.Sprintf("🎯 %s", task.JiraID)
+			b.WriteString(fieldStyle.Render(jiraLine))
+			b.WriteString("\n")
+		}
+		
+		// Due date (if exists)
+		if task.Due != nil {
+			now := time.Now()
+			days := int(task.Due.Sub(now).Hours() / 24)
+			var dueText, dueColor string
+			
+			if days < 0 {
+				dueText = "OVERDUE"
+				dueColor = ColorError
+			} else if days == 0 {
+				dueText = "TODAY"
+				dueColor = ColorWarning
+			} else if days == 1 {
+				dueText = "TOMORROW"
+				dueColor = ColorWarning
+			} else if days <= 7 {
+				dueText = fmt.Sprintf("%dd", days)
+				dueColor = ColorAccentBright
+			} else {
+				dueText = task.Due.Format("02/01")
+				dueColor = ColorSecondaryText
+			}
+			
+			dueLine := fmt.Sprintf("📅 %s", 
+				lipgloss.NewStyle().Foreground(lipgloss.Color(dueColor)).Bold(true).Render(dueText))
+			b.WriteString(fieldStyle.Render(dueLine))
+			b.WriteString("\n")
+		}
+		
+		// Notes (if exist) - very compact
+		if task.Note != "" {
+			b.WriteString("\n")
+			noteHeaderStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorSecondaryText)).
+				Align(lipgloss.Center).
+				Width(width-8)
+			b.WriteString(noteHeaderStyle.Render("📝 Notes"))
+			b.WriteString("\n")
+			
+			// Truncate notes for narrow view
+			notes := task.Note
+			maxNoteLen := (width - 10) * 3 // Allow up to 3 lines
+			if len(notes) > maxNoteLen {
+				notes = notes[:maxNoteLen-3] + "..."
+			}
+			
+			compactNoteStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorSecondaryText)).
+				Width(width - 10).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color(ColorBorder)).
+				Align(lipgloss.Left).
+				Padding(0, 1)
+			b.WriteString(compactNoteStyle.Render(notes))
+		}
+		
+		// Tip at bottom
+		b.WriteString("\n\n")
+		tipStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorHelpText)).
+			Italic(true).
+			Align(lipgloss.Center).
+			Width(width-8)
+		b.WriteString(tipStyle.Render("💡 Stretch for full view"))
+	}
+	
+	// Apply compact purple border
+	compactBorderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorAccentMain)).
+		Width(width - 4).
+		Padding(1, 2)
+	
+	return compactBorderStyle.Render(b.String())
 }
 
 // renderSearchBar renders the search bar when active
