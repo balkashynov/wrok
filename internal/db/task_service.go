@@ -330,3 +330,112 @@ func MarkTaskUndone(taskID uint) (*models.Task, error) {
 	
 	return task, nil
 }
+
+// SearchTasks performs comprehensive search across all task fields
+// Search priority: exact match > prefix > suffix > fuzzy (case insensitive)
+func SearchTasks(query string, opts TaskQueryOptions) ([]models.Task, error) {
+	if query == "" {
+		return GetTasksWithOptions(opts)
+	}
+	
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return GetTasksWithOptions(opts)
+	}
+	
+	// Get all tasks first (with existing filters applied)
+	allTasks, err := GetTasksWithOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	
+	var exactMatches []models.Task
+	var prefixMatches []models.Task
+	var suffixMatches []models.Task
+	var fuzzyMatches []models.Task
+	
+	for _, task := range allTasks {
+		// Build searchable text from all fields
+		searchableFields := []string{
+			fmt.Sprintf("%d", task.ID), // Include task ID
+			task.Title,
+			task.Project,
+			task.JiraID,
+			task.Note,
+		}
+		
+		// Add tag names
+		for _, tag := range task.Tags {
+			searchableFields = append(searchableFields, tag.Name)
+		}
+		
+		// Add priority as text
+		switch task.Priority {
+		case 1:
+			searchableFields = append(searchableFields, "low", "1")
+		case 2:
+			searchableFields = append(searchableFields, "medium", "med", "2")
+		case 3:
+			searchableFields = append(searchableFields, "high", "3")
+		}
+		
+		// Add status
+		searchableFields = append(searchableFields, task.Status)
+		
+		// Check each field for matches
+		found := false
+		matchType := ""
+		
+		for _, field := range searchableFields {
+			if field == "" {
+				continue
+			}
+			
+			fieldLower := strings.ToLower(field)
+			
+			// 1. Exact match (highest priority)
+			if fieldLower == query {
+				exactMatches = append(exactMatches, task)
+				found = true
+				matchType = "exact"
+				break
+			}
+			
+			// 2. Prefix match
+			if matchType == "" && strings.HasPrefix(fieldLower, query) {
+				matchType = "prefix"
+			}
+			
+			// 3. Suffix match
+			if matchType == "" && strings.HasSuffix(fieldLower, query) {
+				matchType = "suffix"
+			}
+			
+			// 4. Fuzzy match (contains)
+			if matchType == "" && strings.Contains(fieldLower, query) {
+				matchType = "fuzzy"
+			}
+		}
+		
+		// Add to appropriate list if found and not exact
+		if !found && matchType != "" {
+			switch matchType {
+			case "prefix":
+				prefixMatches = append(prefixMatches, task)
+			case "suffix":
+				suffixMatches = append(suffixMatches, task)
+			case "fuzzy":
+				fuzzyMatches = append(fuzzyMatches, task)
+			}
+		}
+	}
+	
+	// Combine results in priority order
+	var results []models.Task
+	results = append(results, exactMatches...)
+	results = append(results, prefixMatches...)
+	results = append(results, suffixMatches...)
+	results = append(results, fuzzyMatches...)
+	
+	return results, nil
+}

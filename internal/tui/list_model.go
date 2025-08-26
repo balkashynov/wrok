@@ -17,13 +17,15 @@ type ListModel struct {
 	height int
 	
 	// Task data
-	tasks        []models.Task
-	selectedTask int // index in tasks slice
+	originalTasks []models.Task // All tasks before filtering
+	tasks         []models.Task // Currently displayed tasks (filtered or all)
+	selectedTask  int           // index in tasks slice
 	
 	// UI state
-	focus        Focus
-	searchActive bool
-	searchQuery  string
+	focus         Focus
+	searchActive  bool
+	searchQuery   string
+	searchPersisted bool // true if search is applied and persisted (not live searching)
 	
 	// Shimmer effect for selected task title
 	shimmer *ShimmerState
@@ -49,11 +51,12 @@ func NewListModel(tasks []models.Task) ListModel {
 	shimmer := NewShimmerState(shimmerConfig)
 
 	model := ListModel{
-		tasks:        tasks,
-		selectedTask: 0,
-		focus:        FocusTable,
-		shimmer:      shimmer,
-		currentPage:  0,
+		originalTasks: tasks,
+		tasks:         tasks,
+		selectedTask:  0,
+		focus:         FocusTable,
+		shimmer:       shimmer,
+		currentPage:   0,
 	}
 	
 	// Pre-select first task if available
@@ -112,10 +115,14 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			// Handle escape key - exit search mode first if active, otherwise quit
-			if msg.String() == "esc" && m.searchActive {
+			if msg.String() == "esc" && (m.searchActive || m.searchPersisted) {
 				m.focus = FocusTable
 				m.searchActive = false
+				m.searchPersisted = false
 				m.searchQuery = ""
+				m.tasks = m.originalTasks // Restore full task list
+				m.selectedTask = 0 // Reset selection to first task
+				m.currentPage = 0 // Reset to first page
 				m.shimmer.SetActive(true) // Resume shimmer
 				return m, nil
 			}
@@ -165,32 +172,186 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m ListModel) handleSearchKeys(msg tea.KeyMsg) (ListModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		// Exit search
+		// Exit search and restore full task list
 		m.focus = FocusTable
 		m.searchActive = false
+		m.searchPersisted = false
 		m.searchQuery = ""
+		m.tasks = m.originalTasks // Restore full task list
+		m.selectedTask = 0 // Reset selection to first task
+		m.currentPage = 0 // Reset to first page
 		m.shimmer.SetActive(true)
 		return m, nil
 		
 	case "enter":
-		// Apply search and return to table
+		// Persist search and return to table (keep filtered results)
 		m.focus = FocusTable
 		m.searchActive = false
+		m.searchPersisted = true // Mark search as persisted
 		m.shimmer.SetActive(true)
-		// TODO: Apply search filter
 		return m, nil
 		
 	case "backspace":
 		if len(m.searchQuery) > 0 {
 			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+			// Apply live search after removing character
+			m = m.applyLiveSearch()
 		}
 		return m, nil
 		
 	default:
-		// Add character to search query
-		m.searchQuery += msg.String()
+		// Only add printable characters to search query
+		key := msg.String()
+		
+		// Filter out navigation keys and special keys
+		switch key {
+		case "up", "down", "left", "right", "k", "j", "h", "l",
+			 "home", "end", "pgup", "pgdown", "delete", "insert",
+			 "tab", "shift+tab", "ctrl+c", "ctrl+d", "ctrl+z",
+			 "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12":
+			// Ignore these keys in search mode
+			return m, nil
+		}
+		
+		// Filter out keys with modifiers (ctrl+, alt+, etc.)
+		if len(key) > 1 && (strings.Contains(key, "ctrl+") || strings.Contains(key, "alt+") || strings.Contains(key, "shift+")) {
+			return m, nil
+		}
+		
+		// Only accept single printable characters (letters, numbers, symbols, space)
+		if len(key) == 1 {
+			char := rune(key[0])
+			if char >= 32 && char <= 126 { // Printable ASCII characters
+				m.searchQuery += key
+				m = m.applyLiveSearch()
+			}
+		}
+		
 		return m, nil
 	}
+}
+
+// applyLiveSearch applies real-time search filtering
+func (m ListModel) applyLiveSearch() ListModel {
+	if m.searchQuery == "" {
+		// Empty search - show all tasks
+		m.tasks = m.originalTasks
+	} else {
+		// Create a temporary model with original tasks for search
+		// We'll manually apply the search algorithm here instead of using db.SearchTasks
+		// since that function queries the database, but we want to search our in-memory tasks
+		m.tasks = m.searchInMemoryTasks(m.searchQuery, m.originalTasks)
+	}
+	
+	// Reset selection and pagination when search results change
+	m.selectedTask = 0
+	m.currentPage = 0
+	
+	// Ensure selected task index is valid
+	if len(m.tasks) > 0 && m.selectedTask >= len(m.tasks) {
+		m.selectedTask = len(m.tasks) - 1
+	}
+	
+	return m
+}
+
+// searchInMemoryTasks applies search logic to in-memory tasks
+// Replicates the logic from db.SearchTasks but works on a task slice
+func (m ListModel) searchInMemoryTasks(query string, tasks []models.Task) []models.Task {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return tasks
+	}
+	
+	var exactMatches []models.Task
+	var prefixMatches []models.Task
+	var suffixMatches []models.Task
+	var fuzzyMatches []models.Task
+	
+	for _, task := range tasks {
+		// Build searchable text from all fields
+		searchableFields := []string{
+			fmt.Sprintf("%d", task.ID), // Include task ID
+			task.Title,
+			task.Project,
+			task.JiraID,
+			task.Note,
+		}
+		
+		// Add tag names
+		for _, tag := range task.Tags {
+			searchableFields = append(searchableFields, tag.Name)
+		}
+		
+		// Add priority as text
+		switch task.Priority {
+		case 1:
+			searchableFields = append(searchableFields, "low", "1")
+		case 2:
+			searchableFields = append(searchableFields, "medium", "med", "2")
+		case 3:
+			searchableFields = append(searchableFields, "high", "3")
+		}
+		
+		// Add status
+		searchableFields = append(searchableFields, task.Status)
+		
+		// Check each field for matches
+		found := false
+		matchType := ""
+		
+		for _, field := range searchableFields {
+			if field == "" {
+				continue
+			}
+			
+			fieldLower := strings.ToLower(field)
+			
+			// 1. Exact match (highest priority)
+			if fieldLower == query {
+				exactMatches = append(exactMatches, task)
+				found = true
+				matchType = "exact"
+				break
+			}
+			
+			// 2. Prefix match
+			if matchType == "" && strings.HasPrefix(fieldLower, query) {
+				matchType = "prefix"
+			}
+			
+			// 3. Suffix match
+			if matchType == "" && strings.HasSuffix(fieldLower, query) {
+				matchType = "suffix"
+			}
+			
+			// 4. Fuzzy match (contains)
+			if matchType == "" && strings.Contains(fieldLower, query) {
+				matchType = "fuzzy"
+			}
+		}
+		
+		// Add to appropriate list if found and not exact
+		if !found && matchType != "" {
+			switch matchType {
+			case "prefix":
+				prefixMatches = append(prefixMatches, task)
+			case "suffix":
+				suffixMatches = append(suffixMatches, task)
+			case "fuzzy":
+				fuzzyMatches = append(fuzzyMatches, task)
+			}
+		}
+	}
+	
+	// Combine results in priority order
+	var results []models.Task
+	results = append(results, exactMatches...)
+	results = append(results, prefixMatches...)
+	results = append(results, suffixMatches...)
+	results = append(results, fuzzyMatches...)
+	
+	return results
 }
 
 // moveSelectionUp moves the selection up
@@ -371,9 +532,9 @@ func (m ListModel) View() string {
 		rightPanel,
 	)
 	
-	// Search bar (if active)
+	// Search bar (if active or persisted)
 	var searchBar string
-	if m.searchActive {
+	if m.searchActive || m.searchPersisted {
 		searchBar = m.renderSearchBar()
 	} else {
 		searchBar = m.renderHelpBar()
@@ -1497,15 +1658,36 @@ func (m ListModel) renderNarrowTaskDetails(width, height int) string {
 	return compactBorderStyle.Render(b.String())
 }
 
-// renderSearchBar renders the search bar when active
+// renderSearchBar renders the search bar when active or persisted
 func (m ListModel) renderSearchBar() string {
 	searchStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorPrimaryText)).
 		Background(lipgloss.Color(ColorBorder)).
 		Padding(0, 1).
 		Width(m.width - 2)
-		
-	prompt := "Search: " + m.searchQuery + "█"
+	
+	var prompt string
+	if m.searchActive {
+		// Live search mode with cursor
+		resultCount := len(m.tasks)
+		if m.searchQuery == "" {
+			prompt = "Search: █ (start typing for live search)"
+		} else {
+			prompt = fmt.Sprintf("Search: %s█ (%d results)", m.searchQuery, resultCount)
+		}
+	} else if m.searchPersisted {
+		// Search is persisted (applied)
+		resultCount := len(m.tasks)
+		prompt = fmt.Sprintf("🔍 Filtered: \"%s\" (%d results) - ESC to clear", m.searchQuery, resultCount)
+		// Different style for persisted search
+		searchStyle = searchStyle.
+			Background(lipgloss.Color(ColorAccentMain)).
+			Bold(true)
+	} else {
+		// This shouldn't happen, but fallback
+		prompt = "Search: " + m.searchQuery
+	}
+	
 	return searchStyle.Render(prompt)
 }
 
