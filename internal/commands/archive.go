@@ -8,10 +8,11 @@ import (
 	"github.com/balkashynov/wrok/internal/db"
 )
 
-var doneCmd = &cobra.Command{
-	Use:   "done [task-id]",
-	Short: "Mark a task as completed",
-	Args:  cobra.ExactArgs(1),
+var archiveCmd = &cobra.Command{
+	Use:     "archive [task-id]",
+	Aliases: []string{"a"},
+	Short:   "Archive a task",
+	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
@@ -19,23 +20,24 @@ var doneCmd = &cobra.Command{
 			return
 		}
 
-		task, err := db.MarkTaskDone(uint(taskID))
+		task, err := db.ArchiveTask(uint(taskID))
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
 
-		fmt.Printf("✅ Marked task #%d as done: %s\n", task.ID, task.Title)
-		if task.DoneAt != nil {
-			fmt.Printf("Completed at: %s\n", task.DoneAt.Format("15:04:05"))
+		fmt.Printf("🗃️  Archived task #%d: %s\n", task.ID, task.Title)
+		if task.ArchivedAt != nil {
+			fmt.Printf("Archived at: %s\n", task.ArchivedAt.Format("15:04:05"))
 		}
 	},
 }
 
-var undoneCmd = &cobra.Command{
-	Use:   "undone [task-id]",
-	Short: "Mark a completed task back to todo status",
-	Args:  cobra.ExactArgs(1),
+var unarchiveCmd = &cobra.Command{
+	Use:     "unarchive [task-id]",
+	Aliases: []string{"ua"},
+	Short:   "Unarchive a task (move back to todo)",
+	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
@@ -43,13 +45,13 @@ var undoneCmd = &cobra.Command{
 			return
 		}
 
-		task, err := db.MarkTaskUndone(uint(taskID))
+		task, err := db.UnarchiveTask(uint(taskID))
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
 
-		fmt.Printf("↩️  Marked task #%d back to todo: %s\n", task.ID, task.Title)
+		fmt.Printf("📤 Unarchived task #%d: %s\n", task.ID, task.Title)
 		fmt.Printf("Status: %s\n", task.Status)
 	},
 }

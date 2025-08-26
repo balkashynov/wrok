@@ -251,3 +251,82 @@ func MarkTaskDone(taskID uint) (*models.Task, error) {
 	
 	return task, nil
 }
+
+// ArchiveTask marks a task as archived and stops any active session
+func ArchiveTask(taskID uint) (*models.Task, error) {
+	// Get the task
+	task, err := GetTaskByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	
+	if task.Status == "archived" {
+		return nil, fmt.Errorf("task #%d is already archived", taskID)
+	}
+	
+	// Check if there's an active session for this task and stop it
+	activeSession, err := GetActiveSession()
+	if err == nil && activeSession != nil && activeSession.TaskID == taskID {
+		_, err = StopActiveSession()
+		if err != nil {
+			return nil, fmt.Errorf("failed to stop active session: %w", err)
+		}
+	}
+	
+	// Update task status
+	now := time.Now()
+	task.Status = "archived"
+	task.ArchivedAt = &now
+	
+	if err := DB.Save(task).Error; err != nil {
+		return nil, err
+	}
+	
+	return task, nil
+}
+
+// UnarchiveTask moves an archived task back to todo status
+func UnarchiveTask(taskID uint) (*models.Task, error) {
+	// Get the task
+	task, err := GetTaskByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	
+	if task.Status != "archived" {
+		return nil, fmt.Errorf("task #%d is not archived", taskID)
+	}
+	
+	// Update task status back to todo
+	task.Status = "todo"
+	task.ArchivedAt = nil // Clear archived timestamp
+	
+	if err := DB.Save(task).Error; err != nil {
+		return nil, err
+	}
+	
+	return task, nil
+}
+
+// MarkTaskUndone moves a done task back to todo status
+func MarkTaskUndone(taskID uint) (*models.Task, error) {
+	// Get the task
+	task, err := GetTaskByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	
+	if task.Status != "done" {
+		return nil, fmt.Errorf("task #%d is not completed", taskID)
+	}
+	
+	// Update task status back to todo
+	task.Status = "todo"
+	task.DoneAt = nil // Clear done timestamp
+	
+	if err := DB.Save(task).Error; err != nil {
+		return nil, err
+	}
+	
+	return task, nil
+}

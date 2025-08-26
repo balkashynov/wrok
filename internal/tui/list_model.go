@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/balkashynov/wrok/internal/db"
 	"github.com/balkashynov/wrok/internal/models"
 )
 
@@ -139,8 +140,21 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.shimmer.SetActive(false) // Stop shimmer when not focused on table
 			return m, nil
 			
+		case "a":
+			// Archive/unarchive selected task
+			if len(m.tasks) > 0 && m.selectedTask < len(m.tasks) {
+				return m.archiveTask()
+			}
+			return m, nil
 			
-		// TODO: Add other hotkeys (e, d, a, s, F)
+		case "d":
+			// Toggle done status of selected task
+			if len(m.tasks) > 0 && m.selectedTask < len(m.tasks) {
+				return m.toggleDoneTask()
+			}
+			return m, nil
+			
+		// TODO: Add other hotkeys (e, s, F)
 		}
 	}
 	
@@ -245,6 +259,91 @@ func (m ListModel) nextPage() ListModel {
 		m.shimmer.Reset()
 	}
 	return m
+}
+
+// archiveTask toggles archive status of the currently selected task and refreshes the list
+func (m ListModel) archiveTask() (ListModel, tea.Cmd) {
+	if len(m.tasks) == 0 || m.selectedTask >= len(m.tasks) {
+		return m, nil
+	}
+	
+	task := m.tasks[m.selectedTask]
+	
+	// Toggle archive status
+	if task.Status == "archived" {
+		// Unarchive - move back to todo
+		_, err := db.UnarchiveTask(task.ID)
+		if err != nil {
+			// TODO: Show error message to user
+			return m, nil
+		}
+	} else {
+		// Archive the task
+		_, err := db.ArchiveTask(task.ID)
+		if err != nil {
+			// TODO: Show error message to user
+			return m, nil
+		}
+	}
+	
+	// Refresh the task list
+	return m.refreshTasks()
+}
+
+// toggleDoneTask toggles done status of the currently selected task and refreshes the list
+func (m ListModel) toggleDoneTask() (ListModel, tea.Cmd) {
+	if len(m.tasks) == 0 || m.selectedTask >= len(m.tasks) {
+		return m, nil
+	}
+	
+	task := m.tasks[m.selectedTask]
+	
+	// Toggle done status
+	if task.Status == "done" {
+		// Mark as undone - move back to todo
+		_, err := db.MarkTaskUndone(task.ID)
+		if err != nil {
+			// TODO: Show error message to user
+			return m, nil
+		}
+	} else {
+		// Mark as done
+		_, err := db.MarkTaskDone(task.ID)
+		if err != nil {
+			// TODO: Show error message to user
+			return m, nil
+		}
+	}
+	
+	// Refresh the task list
+	return m.refreshTasks()
+}
+
+// refreshTasks fetches fresh data from the database
+func (m ListModel) refreshTasks() (ListModel, tea.Cmd) {
+	// Re-fetch tasks from database
+	tasks, err := db.GetTasks()
+	if err != nil {
+		// TODO: Handle error
+		return m, nil
+	}
+	
+	// Update model with fresh data
+	m.tasks = tasks
+	
+	// Adjust selection if it's now out of bounds
+	if m.selectedTask >= len(m.tasks) {
+		if len(m.tasks) > 0 {
+			m.selectedTask = len(m.tasks) - 1
+		} else {
+			m.selectedTask = 0
+		}
+	}
+	
+	// Reset shimmer for new selection
+	m.shimmer.Reset()
+	
+	return m, nil
 }
 
 // View renders the TUI
@@ -410,6 +509,8 @@ func (m ListModel) renderTaskTable(width int) string {
 		var statusText string
 		if task.Status == "done" {
 			statusText = "✓ done"
+		} else if task.Status == "archived" {
+			statusText = "archive"
 		} else {
 			statusText = "○ todo"
 		}
@@ -490,6 +591,8 @@ func (m ListModel) renderTaskTable(width int) string {
 		var coloredStatusText string
 		if task.Status == "done" {
 			coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess)).Render(statusText)
+		} else if task.Status == "archived" {
+			coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(statusText)
 		} else {
 			coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(statusText)
 		}
@@ -578,6 +681,8 @@ func (m ListModel) renderTaskTable(width int) string {
 			// Re-apply color after truncation
 			if task.Status == "done" {
 				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess)).Render(statusText)
+			} else if task.Status == "archived" {
+				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(statusText)
 			} else {
 				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(statusText)
 			}
@@ -623,8 +728,17 @@ func (m ListModel) renderTaskTable(width int) string {
 			// Selected row: custom text with ID, title, and non-null fields
 			var customParts []string
 			
-			// Build parts with proper styling
-			customParts = append(customParts, id)
+			// Build parts with proper styling - color ID based on status
+			var coloredID string
+			if task.Status == "done" {
+				coloredID = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess)).Render(id)
+			} else if task.Status == "archived" {
+				coloredID = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(id)
+			} else {
+				// todo - keep default color
+				coloredID = id
+			}
+			customParts = append(customParts, coloredID)
 			
 			// Add title with shimmer effect (give it plenty of width)
 			shimmeredTitle := m.shimmer.RenderShimmerText(task.Title, len(task.Title)+20) // Extra width for shimmer effect
@@ -713,7 +827,16 @@ func (m ListModel) renderTaskTable(width int) string {
 				truncatedParts := make([]string, 0)
 				
 				// Rebuild parts with truncated JIRA (with styling)
-				truncatedParts = append(truncatedParts, id)
+				// Color ID based on status
+				var coloredID string
+				if task.Status == "done" {
+					coloredID = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess)).Render(id)
+				} else if task.Status == "archived" {
+					coloredID = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(id)
+				} else {
+					coloredID = id
+				}
+				truncatedParts = append(truncatedParts, coloredID)
 				
 				// Add shimmered title
 				shimmeredTitle := m.shimmer.RenderShimmerText(task.Title, len(task.Title)+20)
@@ -788,7 +911,16 @@ func (m ListModel) renderTaskTable(width int) string {
 					truncatedParts := make([]string, 0)
 					
 					// Rebuild with truncated title
-					truncatedParts = append(truncatedParts, id)
+					// Color ID based on status
+					var coloredID string
+					if task.Status == "done" {
+						coloredID = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSuccess)).Render(id)
+					} else if task.Status == "archived" {
+						coloredID = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(id)
+					} else {
+						coloredID = id
+					}
+					truncatedParts = append(truncatedParts, coloredID)
 					// Apply shimmer to truncated title with proper width
 				shimmeredTruncatedTitle := m.shimmer.RenderShimmerText(truncatedTitle, len(truncatedTitle))
 				truncatedParts = append(truncatedParts, shimmeredTruncatedTitle)
@@ -967,6 +1099,10 @@ func (m ListModel) renderTaskDetails(width, height int) string {
 			statusIcon = "✅"
 			statusColor = ColorSuccess
 			statusText = "done"
+		} else if task.Status == "archived" {
+			statusIcon = "▪"
+			statusColor = ColorDisabledText
+			statusText = "archived"
 		}
 		
 		statusStyle := lipgloss.NewStyle().
@@ -1217,12 +1353,16 @@ func (m ListModel) renderNarrowTaskDetails(width, height int) string {
 		// Status
 		statusIcon := "○"
 		statusColor := ColorSecondaryText
+		statusText := task.Status
 		if task.Status == "done" {
 			statusIcon = "✓"
 			statusColor = ColorSuccess
+		} else if task.Status == "archived" {
+			statusIcon = "▪"
+			statusColor = ColorDisabledText
 		}
 		statusLine := fmt.Sprintf("%s %s", statusIcon, 
-			lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Bold(true).Render(task.Status))
+			lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Bold(true).Render(statusText))
 		b.WriteString(fieldStyle.Render(statusLine))
 		b.WriteString("\n")
 		
@@ -1377,6 +1517,6 @@ func (m ListModel) renderHelpBar() string {
 		Align(lipgloss.Center).
 		Width(m.width)
 		
-	helpText := "↑/↓ nav · ←/→ page · / search · e edit · d done · s start/stop · q/esc quit"
+	helpText := "↑/↓ nav · ←/→ page · / search · e edit · d done/undone · a archive/unarchive · s start/stop · q/esc quit"
 	return helpStyle.Render(helpText)
 }

@@ -31,4 +31,7 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(doneCmd)
+	rootCmd.AddCommand(undoneCmd)
+	rootCmd.AddCommand(archiveCmd)
+	rootCmd.AddCommand(unarchiveCmd)
 }
