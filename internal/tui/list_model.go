@@ -516,10 +516,10 @@ func (m ListModel) View() string {
 	// Calculate layout
 	leftWidth := m.width * 60 / 100  // 60% for table
 	rightWidth := m.width - leftWidth - 1 // Rest for details
-	contentHeight := m.height - 6 // Reserve space for search/help bar
+	contentHeight := m.height - 4 // Reserve space for search/help bar
 	
 	// Left panel: Task table
-	leftPanel := m.renderTaskTable(leftWidth)
+	leftPanel := m.renderTaskTable(leftWidth, contentHeight)
 	
 	// Right panel: Task details
 	rightPanel := m.renderTaskDetails(rightWidth, contentHeight)
@@ -559,7 +559,7 @@ func min(a, b int) int {
 }
 
 // renderTaskTable renders the left panel with the task table
-func (m ListModel) renderTaskTable(width int) string {
+func (m ListModel) renderTaskTable(width int, height int) string {
 	var b strings.Builder
 	
 	// Table header
@@ -570,13 +570,8 @@ func (m ListModel) renderTaskTable(width int) string {
 	b.WriteString(headerStyle.Render("📋 Tasks"))
 	b.WriteString("\n\n")
 	
-	if len(m.tasks) == 0 {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorSecondaryText)).
-			Italic(true)
-		b.WriteString(emptyStyle.Render("No tasks found"))
-		return b.String()
-	}
+	// Always show column headers, even when no tasks
+	
 	
 	// Table column headers
 	columnHeaderStyle := lipgloss.NewStyle().
@@ -645,6 +640,19 @@ func (m ListModel) renderTaskTable(width int) string {
 	// Calculate visible tasks for current page  
 	startIndex := m.currentPage * m.tasksPerPage
 	endIndex := min(startIndex+m.tasksPerPage, len(m.tasks))
+	
+	// Handle empty task list
+	if len(m.tasks) == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorSecondaryText)).
+			Italic(true).
+			Align(lipgloss.Center).
+			Width(availableWidth).
+			Padding(2, 0)
+		
+		b.WriteString(emptyStyle.Render("No tasks found"))
+		b.WriteString("\n")
+	} else {
 	
 	// Render task rows
 	for i := startIndex; i < endIndex; i++ {
@@ -1133,7 +1141,7 @@ func (m ListModel) renderTaskTable(width int) string {
 		}
 		b.WriteString("\n")
 	}
-	
+	} // Close the else block for when there are tasks
 	
 	// Pagination info
 	if m.tasksPerPage < len(m.tasks) {
@@ -1147,12 +1155,12 @@ func (m ListModel) renderTaskTable(width int) string {
 		b.WriteString(pageStyle.Render(pageInfo))
 	}
 	
-	// Apply outer border
+	// Apply outer border with fixed height
 	outerBorderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ColorBorder)).
-		Width(width)
-		// Remove fixed height to let content determine size
+		Width(width).
+		Height(height)
 	
 	return outerBorderStyle.Render(b.String())
 }
