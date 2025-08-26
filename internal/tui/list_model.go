@@ -770,7 +770,9 @@ func (m ListModel) renderTaskTable(width int) string {
 					overflow := visualLength(customText) - maxWidth + 3 // +3 for "..."
 					if len(task.Title) > overflow + 10 { // Keep at least 10 chars
 						truncatedTitle := task.Title[:len(task.Title)-overflow] + "..."
-						truncatedParts[1] = truncatedTitle // Title is at index 1
+						// Apply shimmer to truncated title with proper width
+					shimmeredTruncatedTitle := m.shimmer.RenderShimmerText(truncatedTitle, len(truncatedTitle))
+					truncatedParts[1] = shimmeredTruncatedTitle // Title is at index 1 with shimmer
 						customText = strings.Join(truncatedParts, "   ")
 					} else {
 						// Fallback: truncate entire string
@@ -786,7 +788,9 @@ func (m ListModel) renderTaskTable(width int) string {
 					
 					// Rebuild with truncated title
 					truncatedParts = append(truncatedParts, id)
-					truncatedParts = append(truncatedParts, truncatedTitle)
+					// Apply shimmer to truncated title with proper width
+				shimmeredTruncatedTitle := m.shimmer.RenderShimmerText(truncatedTitle, len(truncatedTitle))
+				truncatedParts = append(truncatedParts, shimmeredTruncatedTitle)
 					
 					if task.Priority > 0 && task.Priority <= 3 {
 						priorities := []string{"", "low", "med", "high"}
