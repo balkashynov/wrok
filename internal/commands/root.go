@@ -26,6 +26,7 @@ func Execute() error {
 func init() {
 	// Add subcommands here
 	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(editCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(startCmd)

@@ -68,6 +68,72 @@ func CreateTask(req CreateTaskRequest) (*models.Task, error) {
 	return &task, nil
 }
 
+// UpdateTaskRequest holds the data needed to update an existing task
+type UpdateTaskRequest struct {
+	ID       uint
+	Title    string
+	Project  string
+	Tags     []string
+	Priority string // can be "low/medium/high" or "1/2/3" or empty for no priority
+	JiraID   string
+	URL      string
+	Note     string
+	DueDate  *time.Time
+}
+
+// UpdateTask updates an existing task with new data
+func UpdateTask(req UpdateTaskRequest) (*models.Task, error) {
+	// Get the existing task
+	task, err := GetTaskByID(req.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse priority (optional)
+	priority := parsePriority(req.Priority)
+	
+	// Normalize JIRA ID if provided and valid format
+	normalizedJiraID := ""
+	if req.JiraID != "" {
+		if parser.IsValidJiraFormat(req.JiraID) {
+			// Only normalize valid JIRA IDs
+			normalized, _ := parser.NormalizeJiraID(req.JiraID)
+			normalizedJiraID = normalized
+		} else {
+			// Keep invalid JIRA IDs as-is without uppercasing
+			normalizedJiraID = req.JiraID
+		}
+	}
+	
+	// Update task fields
+	task.Title = req.Title
+	task.Project = req.Project
+	task.Priority = priority
+	task.JiraID = normalizedJiraID
+	task.URL = req.URL
+	task.Note = req.Note
+	task.Due = req.DueDate
+
+	// Process tags - clear existing and set new ones
+	if len(req.Tags) > 0 {
+		tags, err := findOrCreateTags(req.Tags)
+		if err != nil {
+			return nil, err
+		}
+		task.Tags = tags
+	} else {
+		// Clear all tags if none provided
+		task.Tags = []models.Tag{}
+	}
+
+	// Save updated task to database
+	if err := DB.Save(&task).Error; err != nil {
+		return nil, err
+	}
+
+	return task, nil
+}
+
 // parsePriority converts priority string to int
 func parsePriority(priority string) int {
 	priority = strings.ToLower(strings.TrimSpace(priority))
@@ -202,7 +268,6 @@ func GetTasksWithOptions(opts TaskQueryOptions) ([]models.Task, error) {
 	
 	return tasks, nil
 }
-
 
 // GetActiveTask returns the currently active (tracking time) task
 func GetActiveTask() (*models.Task, error) {

@@ -27,6 +27,7 @@ const (
 	StepJira
 	StepDueDate
 	StepNotes
+	StepSave
 	StepComplete
 )
 
@@ -49,6 +50,10 @@ type AddTaskModel struct {
 	// Pre-filled data from flags or parsing
 	prefilled map[string]string
 	
+	// Edit mode
+	isEditMode    bool
+	editTaskID    uint
+	
 	// State
 	err           error
 	completed     bool
@@ -62,6 +67,10 @@ type AddTaskModel struct {
 	
 	// Shimmer effect for field labels
 	shimmer *ShimmerState
+	
+	// Save confirmation modal
+	showSaveModal bool
+	saveModalChoice bool // true for Yes, false for No
 }
 
 // NewAddTaskModel creates a new add task TUI model
@@ -152,6 +161,18 @@ func NewAddTaskModel(prefilled map[string]string) AddTaskModel {
 	return m
 }
 
+// NewEditTaskModel creates a new edit task TUI model with existing task data
+func NewEditTaskModel(taskID uint, prefilled map[string]string) AddTaskModel {
+	// Create model using the same logic as NewAddTaskModel
+	m := NewAddTaskModel(prefilled)
+	
+	// Set edit mode
+	m.isEditMode = true
+	m.editTaskID = taskID
+	
+	return m
+}
+
 // Init initializes the model
 func (m AddTaskModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink}
@@ -201,10 +222,53 @@ func (m AddTaskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 		
 	case tea.KeyMsg:
+		// Handle save modal keys if modal is shown
+		if m.showSaveModal {
+			switch msg.String() {
+			case "left", "right":
+				m.saveModalChoice = !m.saveModalChoice
+				return m, nil
+			case "y", "Y":
+				m.saveModalChoice = true
+				return m.handleSaveChoice()
+			case "n", "N":
+				m.saveModalChoice = false
+				return m.handleSaveChoice()
+			case "enter":
+				return m.handleSaveChoice()
+			case "esc":
+				// Close modal and go back to editing
+				m.showSaveModal = false
+				return m, nil
+			case "ctrl+c":
+				m.cancelled = true
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c":
 			m.cancelled = true
 			return m, tea.Quit
+		
+		case "esc":
+			// If on Save step, go back to previous step instead of showing modal
+			if m.currentStep == StepSave {
+				return m.prevStep()
+			}
+			
+			// Check if there are any changes before showing save modal
+			if !m.hasChanges() {
+				// No changes, exit immediately
+				m.cancelled = true
+				return m, tea.Quit
+			}
+			
+			// Show save confirmation modal for unsaved changes
+			m.showSaveModal = true
+			m.saveModalChoice = true // Default to "Yes"
+			return m, nil
 			
 		case "enter":
 			return m.handleEnter()
@@ -222,12 +286,14 @@ func (m AddTaskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	
-	// Update the current input
+	// Update the current input (only for input steps, not Save step)
 	var cmd tea.Cmd
-	m.inputs[m.currentStep], cmd = m.inputs[m.currentStep].Update(msg)
-	
-	// Update the corresponding field
-	m.updateCurrentField()
+	if m.currentStep < StepSave {
+		m.inputs[m.currentStep], cmd = m.inputs[m.currentStep].Update(msg)
+		
+		// Update the corresponding field
+		m.updateCurrentField()
+	}
 	
 	return m, cmd
 }
@@ -291,12 +357,19 @@ func (m AddTaskModel) View() string {
 	rightPanel := rightStyle.Render(right)
 	
 	// Combine with explicit spacing
-	return lipgloss.JoinHorizontal(
+	mainView := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		leftPanel,
 		" ", // Add explicit separator
 		rightPanel,
 	)
+	
+	// Add save modal overlay if shown
+	if m.showSaveModal {
+		return m.renderSaveModal(mainView)
+	}
+	
+	return mainView
 }
 
 // renderWizard renders the step-by-step wizard
@@ -309,11 +382,17 @@ func (m AddTaskModel) renderWizard() string {
 		Bold(true).
 		Foreground(lipgloss.Color(ColorAccentBright)).
 		MarginBottom(1)
-	b.WriteString(titleStyle.Render("📝 Create New Task"))
+	
+	titleText := "📝 Create New Task"
+	if m.isEditMode {
+		titleText = fmt.Sprintf("📝 Edit Task #%d", m.editTaskID)
+	}
+	
+	b.WriteString(titleStyle.Render(titleText))
 	b.WriteString("\n\n")
 	
 	// Current step indicator with dynamic coloring (with fallback)
-	stepLabels := []string{"Title", "Project", "Tags", "Priority", "JIRA", "Due Date", "Notes"}
+	stepLabels := []string{"Title", "Project", "Tags", "Priority", "JIRA", "Due Date", "Notes", "Save"}
 	
 	// Check if terminal supports colors
 	supportsColor := m.terminalSupportsColor()
@@ -327,12 +406,26 @@ func (m AddTaskModel) renderWizard() string {
 		resetColor := "\033[0m"
 		
 		for i, label := range stepLabels {
+			hasValue := m.stepHasValue(Step(i))
+			
+			// Add extra spacing before Save step to distinguish it
+			if Step(i) == StepSave {
+				b.WriteString("\n") // Extra line before Save step
+			}
+			
 			if Step(i) == m.currentStep {
 				// Current step - purple arrow
-				b.WriteString(fmt.Sprintf("%s▶ %s%s\n", purpleColor, label, resetColor))
+				if Step(i) == StepSave {
+					// Special styling for Save step when current
+					b.WriteString(fmt.Sprintf("%s▶ 💾 %s%s\n", purpleColor, label, resetColor))
+				} else {
+					b.WriteString(fmt.Sprintf("%s▶ %s%s\n", purpleColor, label, resetColor))
+				}
+			} else if m.isEditMode && hasValue {
+				// Edit mode: all populated steps show as completed (green)
+				b.WriteString(fmt.Sprintf("%s✓ %s%s\n", greenColor, label, resetColor))
 			} else if Step(i) < m.currentStep {
 				// Check if step was actually completed or skipped
-				hasValue := m.stepHasValue(Step(i))
 				if hasValue {
 					// Completed with value - green checkmark and text
 					b.WriteString(fmt.Sprintf("%s✓ %s%s\n", greenColor, label, resetColor))
@@ -341,19 +434,42 @@ func (m AddTaskModel) renderWizard() string {
 					b.WriteString(fmt.Sprintf("%s  %s%s\n", darkGreyPurpleColor, label, resetColor))
 				}
 			} else {
-				// Future step - lighter default grey
-				b.WriteString(fmt.Sprintf("%s  %s%s\n", lightGreyColor, label, resetColor))
+				// Future step - lighter default grey (or grey in edit mode if no value)
+				color := lightGreyColor
+				if m.isEditMode && !hasValue {
+					color = darkGreyPurpleColor // Darker grey for empty fields in edit mode
+				}
+				
+				if Step(i) == StepSave {
+					// Special styling for Save step when not current
+					b.WriteString(fmt.Sprintf("%s  💾 %s%s\n", color, label, resetColor))
+				} else {
+					b.WriteString(fmt.Sprintf("%s  %s%s\n", color, label, resetColor))
+				}
 			}
 		}
 	} else {
 		// Fallback for terminals that don't support colors - plain text
 		for i, label := range stepLabels {
+			hasValue := m.stepHasValue(Step(i))
+			
+			// Add extra spacing before Save step to distinguish it
+			if Step(i) == StepSave {
+				b.WriteString("\n") // Extra line before Save step
+			}
+			
 			if Step(i) == m.currentStep {
 				// Current step - arrow
-				b.WriteString(fmt.Sprintf("▶ %s\n", label))
+				if Step(i) == StepSave {
+					b.WriteString(fmt.Sprintf("▶ 💾 %s\n", label))
+				} else {
+					b.WriteString(fmt.Sprintf("▶ %s\n", label))
+				}
+			} else if m.isEditMode && hasValue {
+				// Edit mode: all populated steps show as completed (checkmark)
+				b.WriteString(fmt.Sprintf("✓ %s\n", label))
 			} else if Step(i) < m.currentStep {
 				// Check if step was actually completed or skipped
-				hasValue := m.stepHasValue(Step(i))
 				if hasValue {
 					// Completed with value - checkmark
 					b.WriteString(fmt.Sprintf("✓ %s\n", label))
@@ -363,7 +479,11 @@ func (m AddTaskModel) renderWizard() string {
 				}
 			} else {
 				// Future step
-				b.WriteString(fmt.Sprintf("  %s\n", label))
+				if Step(i) == StepSave {
+					b.WriteString(fmt.Sprintf("  💾 %s\n", label))
+				} else {
+					b.WriteString(fmt.Sprintf("  %s\n", label))
+				}
 			}
 		}
 	}
@@ -401,6 +521,10 @@ func (m AddTaskModel) renderWizard() string {
 	case StepNotes:
 		b.WriteString("📝 Notes\n")
 		b.WriteString(m.inputs[6].View())
+		
+	case StepSave:
+		b.WriteString("💾 Save Task\n")
+		b.WriteString("Press Enter to save task")
 	}
 	
 	// Show validation error if any
@@ -449,8 +573,65 @@ func (m AddTaskModel) stepHasValue(step Step) bool {
 		return strings.TrimSpace(m.dueDate) != ""
 	case StepNotes:
 		return strings.TrimSpace(m.notes) != ""
+	case StepSave:
+		return false // Save step doesn't have a value, it's an action
 	default:
 		return false
+	}
+}
+
+// hasChanges checks if there are any changes made to the task
+func (m AddTaskModel) hasChanges() bool {
+	if m.isEditMode {
+		// In edit mode, check if any field was changed from original prefilled values
+		if m.prefilled == nil {
+			return true // If no prefilled data, assume changes
+		}
+		
+		// Compare each field with prefilled values
+		if strings.TrimSpace(m.title) != strings.TrimSpace(m.prefilled["title"]) {
+			return true
+		}
+		if strings.TrimSpace(m.project) != strings.TrimSpace(m.prefilled["project"]) {
+			return true
+		}
+		if strings.TrimSpace(m.priority) != strings.TrimSpace(m.prefilled["priority"]) {
+			return true
+		}
+		if strings.TrimSpace(m.jiraID) != strings.TrimSpace(m.prefilled["jira"]) {
+			return true
+		}
+		if strings.TrimSpace(m.dueDate) != strings.TrimSpace(m.prefilled["due_date"]) {
+			return true
+		}
+		if strings.TrimSpace(m.notes) != strings.TrimSpace(m.prefilled["notes"]) {
+			return true
+		}
+		
+		// Compare tags (more complex comparison)
+		prefilledTags := strings.TrimSpace(m.prefilled["tags"])
+		currentTagsStr := ""
+		if len(m.tags) > 0 {
+			var tagNames []string
+			for _, tag := range m.tags {
+				tagNames = append(tagNames, "#"+tag)
+			}
+			currentTagsStr = strings.Join(tagNames, ", ")
+		}
+		if currentTagsStr != prefilledTags {
+			return true
+		}
+		
+		return false // No changes detected
+	} else {
+		// In add mode, check if any field has content
+		return strings.TrimSpace(m.title) != "" || 
+		       strings.TrimSpace(m.project) != "" ||
+		       len(m.tags) > 0 ||
+		       strings.TrimSpace(m.priority) != "" ||
+		       strings.TrimSpace(m.jiraID) != "" ||
+		       strings.TrimSpace(m.dueDate) != "" ||
+		       strings.TrimSpace(m.notes) != ""
 	}
 }
 
@@ -831,7 +1012,11 @@ func (m AddTaskModel) handleEnter() (AddTaskModel, tea.Cmd) {
 		}
 		
 	case StepNotes:
-		// Complete the task creation
+		// Notes is optional, move to Save step
+		return m.nextStep()
+		
+	case StepSave:
+		// Save the task
 		return m.createTask()
 	}
 	
@@ -840,10 +1025,13 @@ func (m AddTaskModel) handleEnter() (AddTaskModel, tea.Cmd) {
 
 // nextStep moves to the next step
 func (m AddTaskModel) nextStep() (AddTaskModel, tea.Cmd) {
-	if m.currentStep < StepNotes {
+	if m.currentStep < StepSave {
 		m.inputs[m.currentStep].Blur()
 		m.currentStep++
-		m.inputs[m.currentStep].Focus()
+		if m.currentStep < StepSave {
+			// Only focus input fields, not the Save step
+			m.inputs[m.currentStep].Focus()
+		}
 		// Reset shimmer for new field
 		m.shimmer.Reset()
 	}
@@ -853,9 +1041,13 @@ func (m AddTaskModel) nextStep() (AddTaskModel, tea.Cmd) {
 // prevStep moves to the previous step
 func (m AddTaskModel) prevStep() (AddTaskModel, tea.Cmd) {
 	if m.currentStep > StepTitle {
-		m.inputs[m.currentStep].Blur()
+		if m.currentStep <= StepNotes {
+			m.inputs[m.currentStep].Blur()
+		}
 		m.currentStep--
-		m.inputs[m.currentStep].Focus()
+		if m.currentStep <= StepNotes {
+			m.inputs[m.currentStep].Focus()
+		}
 		// Reset shimmer for new field
 		m.shimmer.Reset()
 	}
@@ -897,25 +1089,124 @@ func (m AddTaskModel) createTask() (AddTaskModel, tea.Cmd) {
 		dueDate = parsedDate
 	}
 	
-	req := db.CreateTaskRequest{
-		Title:    m.title,
-		Project:  m.project,
-		Tags:     m.tags,
-		Priority: m.priority,
-		JiraID:   m.jiraID,
-		Note:     m.notes,
-		DueDate:  dueDate,
+	if m.isEditMode {
+		// Update existing task
+		updateReq := db.UpdateTaskRequest{
+			ID:       m.editTaskID,
+			Title:    m.title,
+			Project:  m.project,
+			Tags:     m.tags,
+			Priority: m.priority,
+			JiraID:   m.jiraID,
+			Note:     m.notes,
+			DueDate:  dueDate,
+		}
+		
+		task, err := db.UpdateTask(updateReq)
+		if err != nil {
+			m.err = err
+			return m, nil
+		}
+		
+		m.completed = true
+		m.createdTaskID = task.ID
+		m.createdTaskTitle = task.Title
+	} else {
+		// Create new task
+		createReq := db.CreateTaskRequest{
+			Title:    m.title,
+			Project:  m.project,
+			Tags:     m.tags,
+			Priority: m.priority,
+			JiraID:   m.jiraID,
+			Note:     m.notes,
+			DueDate:  dueDate,
+		}
+		
+		task, err := db.CreateTask(createReq)
+		if err != nil {
+			m.err = err
+			return m, nil
+		}
+		
+		m.completed = true
+		m.createdTaskID = task.ID
+		m.createdTaskTitle = task.Title
 	}
-	
-	task, err := db.CreateTask(req)
-	if err != nil {
-		m.err = err
-		return m, nil
-	}
-	
-	m.completed = true
-	m.createdTaskID = task.ID
-	m.createdTaskTitle = task.Title
 	
 	return m, tea.Quit
+}
+
+// handleSaveChoice handles the save confirmation modal response
+func (m AddTaskModel) handleSaveChoice() (AddTaskModel, tea.Cmd) {
+	m.showSaveModal = false
+	
+	if m.saveModalChoice {
+		// User chose "Yes", save the task
+		return m.createTask()
+	} else {
+		// User chose "No", cancel without saving
+		m.cancelled = true
+		return m, tea.Quit
+	}
+}
+
+// renderSaveModal renders the save confirmation modal overlay
+func (m AddTaskModel) renderSaveModal(background string) string {
+	// Modal dimensions
+	modalWidth := 50
+	modalHeight := 7
+	
+	// Modal content
+	var modalContent strings.Builder
+	modalContent.WriteString("Save changes?\n\n")
+	
+	// Yes/No options with highlighting
+	yesStyle := lipgloss.NewStyle().Padding(0, 2)
+	noStyle := lipgloss.NewStyle().Padding(0, 2)
+	
+	if m.saveModalChoice {
+		// "Yes" is selected
+		yesStyle = yesStyle.
+			Background(lipgloss.Color(ColorAccentBright)).
+			Foreground(lipgloss.Color("#000000")).
+			Bold(true)
+	} else {
+		// "No" is selected  
+		noStyle = noStyle.
+			Background(lipgloss.Color(ColorError)).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true)
+	}
+	
+	yesButton := yesStyle.Render("Yes")
+	noButton := noStyle.Render("No")
+	
+	modalContent.WriteString(lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		yesButton,
+		"   ",
+		noButton,
+	))
+	modalContent.WriteString("\n\n")
+	modalContent.WriteString("← → or Y/N to choose, Enter to confirm\nEsc to cancel")
+	
+	// Create modal box
+	modalStyle := lipgloss.NewStyle().
+		Width(modalWidth).
+		Height(modalHeight).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorAccentBright)).
+		Background(lipgloss.Color(ColorCardBackground)).
+		Padding(1).
+		Align(lipgloss.Center)
+	
+	modal := modalStyle.Render(modalContent.String())
+	
+	// Position the modal with same background
+	return lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		modal,
+	)
 }
