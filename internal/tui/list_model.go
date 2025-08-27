@@ -883,14 +883,42 @@ func (m ListModel) renderTaskTable(width int, height int) string {
 		// Combine with spacing
 		plainRowContent := rowLeft + strings.Repeat(" ", spacingNeeded) + rowRight
 		
-		// Replace plain text with colored versions (responsive)
+		// Apply colors with string replacement
 		rowContent := plainRowContent
-		rowContent = strings.Replace(rowContent, statusText, coloredStatusText, 1)
-		if showExtraColumns {
-			// Only apply these replacements if columns are shown
+		
+		// Apply colors to the formatted string (preserve spacing)
+		if task.Status == "done" {
+			rowContent = strings.Replace(rowContent, statusText, coloredStatusText, 1)
+		} else if task.Status == "archived" {
+			rowContent = strings.Replace(rowContent, statusText, coloredStatusText, 1)
+		} else {
+			rowContent = strings.Replace(rowContent, statusText, coloredStatusText, 1)
+		}
+		
+		// Apply priority coloring
+		if task.Priority > 0 && task.Priority <= 3 {
 			rowContent = strings.Replace(rowContent, priorityText, coloredPriorityText, 1)
+		}
+		
+		// Apply JIRA coloring
+		if task.JiraID != "" {
 			rowContent = strings.Replace(rowContent, jiraText, coloredJiraText, 1)
+		} else {
+			rowContent = strings.Replace(rowContent, "-", lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render("-"), 1)
+		}
+		
+		// Apply due date coloring
+		if task.Due != nil {
 			rowContent = strings.Replace(rowContent, dueText, coloredDueText, 1)
+		} else {
+			// Replace the dash for due date
+			lastDashIndex := strings.LastIndex(rowContent, "-")
+			if lastDashIndex != -1 {
+				before := rowContent[:lastDashIndex]
+				after := rowContent[lastDashIndex+1:]
+				coloredDash := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render("-")
+				rowContent = before + coloredDash + after
+			}
 		}
 		
 		if isSelected {
