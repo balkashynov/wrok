@@ -513,10 +513,22 @@ func (m ListModel) View() string {
 		return "Loading..."
 	}
 	
+	// Handle extremely narrow terminals (< 59px) - show logo and stretch message
+	if m.width < 59 {
+		return m.renderMinimalView()
+	}
+	
 	// Calculate layout
 	leftWidth := m.width * 60 / 100  // 60% for table
 	rightWidth := m.width - leftWidth - 1 // Rest for details
-	contentHeight := m.height - 4 // Reserve space for search/help bar
+	
+	// For narrow terminals, reserve more space for top padding
+	var contentHeight int
+	if m.width < 110 {
+		contentHeight = m.height - 6 // Extra space for narrow screens
+	} else {
+		contentHeight = m.height - 4 // Reserve space for search/help bar
+	}
 	
 	// Left panel: Task table
 	leftPanel := m.renderTaskTable(leftWidth, contentHeight)
@@ -541,13 +553,24 @@ func (m ListModel) View() string {
 	}
 	
 	// Add small margin at top and bottom
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		"", // Small top margin to show border
-		content,
-		"", // Small bottom spacing
-		searchBar,
-	)
+	// For narrow terminals, add extra spacing in the vertical join
+	if m.width < 110 {
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			"\n", // Extra top padding for narrow screens
+			content,
+			"", // Small bottom spacing
+			searchBar,
+		)
+	} else {
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			"", // Small top margin to show border
+			content,
+			"", // Small bottom spacing
+			searchBar,
+		)
+	}
 }
 
 // Helper function for min
@@ -1734,7 +1757,68 @@ func (m ListModel) renderHelpBar() string {
 		Italic(true).
 		Align(lipgloss.Center).
 		Width(m.width)
-		
-	helpText := "↑/↓ nav · ←/→ page · / search · e edit · d done/undone · a archive/unarchive · s start/stop · q/esc quit"
+	
+	var helpText string
+	if m.width < 110 {
+		// For narrow screens, show a stretch recommendation instead of wrapping help text
+		helpText = "💡 Stretch terminal for full experience · q/esc quit"
+	} else {
+		// Full help text for wider screens
+		helpText = "↑/↓ nav · ←/→ page · / search · e edit · d done/undone · a archive/unarchive · s start/stop · q/esc quit"
+	}
+	
 	return helpStyle.Render(helpText)
+}
+
+// renderMinimalView renders a minimal view for extremely narrow terminals (< 59px)
+func (m ListModel) renderMinimalView() string {
+	var b strings.Builder
+	
+	// Center vertically
+	verticalPadding := (m.height - 10) / 2 // Account for logo height
+	if verticalPadding < 1 {
+		verticalPadding = 1
+	}
+	
+	for i := 0; i < verticalPadding; i++ {
+		b.WriteString("\n")
+	}
+	
+	// Simple ASCII logo (smaller version)
+	logoLines := []string{
+		"██╗    ██╗██████╗  ██████╗ ██╗  ██╗",
+		"██║    ██║██╔══██╗██╔═══██╗██║ ██╔╝",
+		"██║ █╗ ██║██████╔╝██║   ██║█████╔╝ ",
+		"██║███╗██║██╔══██╗██║   ██║██╔═██╗ ",
+		"╚███╔███╔╝██║  ██║╚██████╔╝██║  ██╗",
+		" ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝",
+	}
+	
+	logoStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorAccentMain)).
+		Bold(true).
+		Align(lipgloss.Center).
+		Width(m.width)
+	
+	for _, line := range logoLines {
+		b.WriteString(logoStyle.Render(line))
+		b.WriteString("\n")
+	}
+	
+	b.WriteString("\n")
+	
+	// Stretch message
+	messageStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorSecondaryText)).
+		Italic(true).
+		Align(lipgloss.Center).
+		Width(m.width)
+	
+	b.WriteString(messageStyle.Render("Terminal too narrow"))
+	b.WriteString("\n")
+	b.WriteString(messageStyle.Render("Please stretch for usable interface"))
+	b.WriteString("\n\n")
+	b.WriteString(messageStyle.Render("q/esc to quit"))
+	
+	return b.String()
 }
