@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,12 @@ type ListModel struct {
 	searchActive  bool
 	searchQuery   string
 	searchPersisted bool // true if search is applied and persisted (not live searching)
+	
+	// Sorting modal state
+	sortModalOpen bool
+	sortField     string // "id", "title", "priority", "status", "created_at"
+	sortDirection string // "asc", "desc"
+	sortSelection int    // selected option in modal
 	
 	// Shimmer effect for selected task title
 	shimmer *ShimmerState
@@ -57,6 +64,10 @@ func NewListModel(tasks []models.Task) ListModel {
 		focus:         FocusTable,
 		shimmer:       shimmer,
 		currentPage:   0,
+		// Default sorting: ID descending (newest first)
+		sortField:     "id",
+		sortDirection: "desc",
+		sortSelection: 0,
 	}
 	
 	// Pre-select first task if available
@@ -112,6 +123,10 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSearchKeys(msg)
 		}
 		
+		if m.focus == FocusModal && m.sortModalOpen {
+			return m.handleSortModalKeys(msg)
+		}
+		
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			// Handle escape key - exit search mode first if active, otherwise quit
@@ -161,7 +176,15 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 			
-		// TODO: Add other hotkeys (e, s, F)
+		case "F", "f":
+			// Open sort modal
+			m.focus = FocusModal
+			m.sortModalOpen = true
+			m.sortSelection = 0 // Reset selection
+			m.shimmer.SetActive(false) // Stop shimmer when modal is open
+			return m, nil
+			
+		// TODO: Add other hotkeys (e, s)
 		}
 	}
 	
@@ -231,6 +254,69 @@ func (m ListModel) handleSearchKeys(msg tea.KeyMsg) (ListModel, tea.Cmd) {
 	}
 }
 
+// handleSortModalKeys handles key input when the sort modal is open
+func (m ListModel) handleSortModalKeys(msg tea.KeyMsg) (ListModel, tea.Cmd) {
+	sortOptions := []struct {
+		field     string
+		direction string
+		label     string
+	}{
+		{"id", "desc", "ID ↓ (newest first)"},
+		{"id", "asc", "ID ↑ (oldest first)"},
+		{"title", "asc", "Title A-Z"},
+		{"title", "desc", "Title Z-A"},
+		{"priority", "desc", "Priority ↓ (high to low)"},
+		{"priority", "asc", "Priority ↑ (low to high)"},
+		{"status", "asc", "Status (todo → done → archived)"},
+		{"created_at", "desc", "Created ↓ (newest first)"},
+		{"created_at", "asc", "Created ↑ (oldest first)"},
+	}
+	
+	switch msg.String() {
+	case "esc", "q":
+		// Close modal without applying changes
+		m.focus = FocusTable
+		m.sortModalOpen = false
+		m.shimmer.SetActive(true) // Resume shimmer
+		return m, nil
+		
+	case "up", "k":
+		if m.sortSelection > 0 {
+			m.sortSelection--
+		} else {
+			m.sortSelection = len(sortOptions) - 1 // Wrap to bottom
+		}
+		return m, nil
+		
+	case "down", "j":
+		if m.sortSelection < len(sortOptions)-1 {
+			m.sortSelection++
+		} else {
+			m.sortSelection = 0 // Wrap to top
+		}
+		return m, nil
+		
+	case "enter", " ":
+		// Apply selected sorting
+		if m.sortSelection < len(sortOptions) {
+			option := sortOptions[m.sortSelection]
+			m.sortField = option.field
+			m.sortDirection = option.direction
+			
+			// Apply sorting to current tasks
+			m = m.applySorting()
+		}
+		
+		// Close modal
+		m.focus = FocusTable
+		m.sortModalOpen = false
+		m.shimmer.SetActive(true) // Resume shimmer
+		return m, nil
+	}
+	
+	return m, nil
+}
+
 // applyLiveSearch applies real-time search filtering
 func (m ListModel) applyLiveSearch() ListModel {
 	if m.searchQuery == "" {
@@ -251,6 +337,58 @@ func (m ListModel) applyLiveSearch() ListModel {
 	if len(m.tasks) > 0 && m.selectedTask >= len(m.tasks) {
 		m.selectedTask = len(m.tasks) - 1
 	}
+	
+	return m
+}
+
+// applySorting applies the current sort settings to the task list
+func (m ListModel) applySorting() ListModel {
+	if len(m.tasks) == 0 {
+		return m
+	}
+	
+	// Sort tasks based on current sort field and direction
+	sort.Slice(m.tasks, func(i, j int) bool {
+		task1, task2 := m.tasks[i], m.tasks[j]
+		
+		var result bool
+		switch m.sortField {
+		case "id":
+			result = task1.ID < task2.ID
+		case "title":
+			result = strings.ToLower(task1.Title) < strings.ToLower(task2.Title)
+		case "priority":
+			result = task1.Priority < task2.Priority
+		case "status":
+			// Custom status ordering: todo < done < archived
+			statusOrder := map[string]int{"todo": 0, "done": 1, "archived": 2}
+			order1, exists1 := statusOrder[task1.Status]
+			if !exists1 {
+				order1 = 999
+			}
+			order2, exists2 := statusOrder[task2.Status]
+			if !exists2 {
+				order2 = 999
+			}
+			result = order1 < order2
+		case "created_at":
+			result = task1.CreatedAt.Before(task2.CreatedAt)
+		default:
+			// Default to ID
+			result = task1.ID < task2.ID
+		}
+		
+		// Reverse if descending
+		if m.sortDirection == "desc" {
+			result = !result
+		}
+		
+		return result
+	})
+	
+	// Reset selection to first task after sorting
+	m.selectedTask = 0
+	m.currentPage = 0
 	
 	return m
 }
@@ -524,7 +662,7 @@ func (m ListModel) View() string {
 	
 	// For narrow terminals, reserve more space for top padding
 	var contentHeight int
-	if m.width < 110 {
+	if m.width < 114 {
 		contentHeight = m.height - 6 // Extra space for narrow screens
 	} else {
 		contentHeight = m.height - 4 // Reserve space for search/help bar
@@ -552,10 +690,10 @@ func (m ListModel) View() string {
 		searchBar = m.renderHelpBar()
 	}
 	
-	// Add small margin at top and bottom
-	// For narrow terminals, add extra spacing in the vertical join
-	if m.width < 110 {
-		return lipgloss.JoinVertical(
+	// Render main layout
+	var mainView string
+	if m.width < 114 {
+		mainView = lipgloss.JoinVertical(
 			lipgloss.Left,
 			"\n", // Extra top padding for narrow screens
 			content,
@@ -563,7 +701,7 @@ func (m ListModel) View() string {
 			searchBar,
 		)
 	} else {
-		return lipgloss.JoinVertical(
+		mainView = lipgloss.JoinVertical(
 			lipgloss.Left,
 			"", // Small top margin to show border
 			content,
@@ -571,6 +709,13 @@ func (m ListModel) View() string {
 			searchBar,
 		)
 	}
+	
+	// Overlay sort modal if open
+	if m.sortModalOpen {
+		return m.renderSortModal(mainView)
+	}
+	
+	return mainView
 }
 
 // Helper function for min
@@ -1221,7 +1366,7 @@ func (m ListModel) renderTaskDetails(width, height int) string {
 	var b strings.Builder
 	
 	// Handle narrow terminals (< 110px total width) or short terminals (< 35px height) with simpler design
-	if m.width < 110 || m.height < 35 {
+	if m.width < 114 || m.height < 35 {
 		return m.renderNarrowTaskDetails(width, height)
 	}
 	
@@ -1759,15 +1904,106 @@ func (m ListModel) renderHelpBar() string {
 		Width(m.width)
 	
 	var helpText string
-	if m.width < 110 {
+	if m.width < 114 {
 		// For narrow screens, show a stretch recommendation instead of wrapping help text
 		helpText = "💡 Stretch terminal for full experience · q/esc quit"
 	} else {
 		// Full help text for wider screens
-		helpText = "↑/↓ nav · ←/→ page · / search · e edit · d done/undone · a archive/unarchive · s start/stop · q/esc quit"
+		helpText = "↑/↓ nav · ←/→ page · / search · f sort · e edit · d done/undone · a archive/unarchive · s start/stop · q/esc quit"
 	}
 	
 	return helpStyle.Render(helpText)
+}
+
+// renderSortModal renders the sorting modal overlayed on the main view
+func (m ListModel) renderSortModal(backgroundView string) string {
+	sortOptions := []struct {
+		field     string
+		direction string
+		label     string
+	}{
+		{"id", "desc", "ID ↓ (newest first)"},
+		{"id", "asc", "ID ↑ (oldest first)"},
+		{"title", "asc", "Title A-Z"},
+		{"title", "desc", "Title Z-A"},
+		{"priority", "desc", "Priority ↓ (high to low)"},
+		{"priority", "asc", "Priority ↑ (low to high)"},
+		{"status", "asc", "Status (todo → done → archived)"},
+		{"created_at", "desc", "Created ↓ (newest first)"},
+		{"created_at", "asc", "Created ↑ (oldest first)"},
+	}
+	
+	// Modal content
+	var modalContent strings.Builder
+	
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ColorAccentMain)).
+		Align(lipgloss.Center).
+		Width(50).
+		Padding(0, 1)
+	
+	modalContent.WriteString(titleStyle.Render("🔧 Sort Tasks"))
+	modalContent.WriteString("\n\n")
+	
+	// Options
+	for i, option := range sortOptions {
+		var optionStyle lipgloss.Style
+		if i == m.sortSelection {
+			// Selected option
+			optionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorPrimaryText)).
+				Background(lipgloss.Color(ColorAccentMain)).
+				Bold(true).
+				Width(48).
+				Padding(0, 1)
+		} else {
+			// Regular option
+			optionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorSecondaryText)).
+				Width(48).
+				Padding(0, 1)
+		}
+		
+		// Mark current sorting option
+		prefix := "  "
+		if option.field == m.sortField && option.direction == m.sortDirection {
+			prefix = "● " // Current selection marker
+		}
+		
+		modalContent.WriteString(optionStyle.Render(prefix + option.label))
+		modalContent.WriteString("\n")
+	}
+	
+	modalContent.WriteString("\n")
+	
+	// Help text
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorHelpText)).
+		Italic(true).
+		Align(lipgloss.Center).
+		Width(50)
+	
+	modalContent.WriteString(helpStyle.Render("↑/↓ navigate · Enter/Space apply · Esc cancel"))
+	
+	// Modal box
+	modalBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorAccentMain)).
+		Background(lipgloss.Color(ColorCardBackground)).
+		Width(50).
+		Padding(1, 1)
+	
+	modal := modalBox.Render(modalContent.String())
+	
+	// Center the modal on the screen
+	modalStyle := lipgloss.NewStyle().
+		Width(m.width).
+		Height(m.height).
+		Align(lipgloss.Center, lipgloss.Center)
+	
+	return modalStyle.Render(modal)
 }
 
 // renderMinimalView renders a minimal view for extremely narrow terminals (< 59px)
