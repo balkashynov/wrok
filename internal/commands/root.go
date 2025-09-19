@@ -16,12 +16,21 @@ var rootCmd = &cobra.Command{
 	Short: "A CLI todo and time tracker",
 	Long: `wrok is a command-line tool that combines task management with time tracking.
 Track your tasks, monitor your time, and generate reports all from the terminal.`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Initialize database before any command runs
-		if err := db.Initialize(); err != nil {
-			panic(err) // For now, panic on DB init failure
-		}
-	},
+}
+
+// initDB initializes the database and panics on error
+func initDB() {
+	if err := db.Initialize(); err != nil {
+		panic(err) // For now, panic on DB init failure
+	}
+}
+
+// withDB wraps a command function to initialize the database first
+func withDB(fn func(*cobra.Command, []string)) func(*cobra.Command, []string) {
+	return func(cmd *cobra.Command, args []string) {
+		initDB()
+		fn(cmd, args)
+	}
 }
 
 // SetVersion sets the version information

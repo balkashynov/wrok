@@ -14,6 +14,7 @@ var archiveCmd = &cobra.Command{
 	Short:   "Archive a task",
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
 			fmt.Printf("Error: invalid task ID '%s'\n", args[0])
@@ -39,6 +40,7 @@ var unarchiveCmd = &cobra.Command{
 	Short:   "Unarchive a task (move back to todo)",
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
 			fmt.Printf("Error: invalid task ID '%s'\n", args[0])

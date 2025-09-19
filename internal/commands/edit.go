@@ -22,6 +22,7 @@ Usage:
   wrok edit 42    - Edit task with ID 42`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		// Parse task ID
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {

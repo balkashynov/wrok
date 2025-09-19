@@ -19,6 +19,7 @@ var listCmd = &cobra.Command{
 	Short:   "List tasks",
 	Long:    "List tasks with optional filters and formats. Opens interactive TUI by default, use --no-ui for simple output.",
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		// Get flags
 		noUI, _ := cmd.Flags().GetBool("no-ui")
 		jsonOutput, _ := cmd.Flags().GetBool("json")

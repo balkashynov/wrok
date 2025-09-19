@@ -28,6 +28,7 @@ Smart parsing syntax:
   due:3days   - Due date (dd/mm/yyyy, X days, X hours, X weeks)`,
 	Args: cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		interactive, _ := cmd.Flags().GetBool("interactive")
 		
 		// If no args and not explicitly interactive, go interactive

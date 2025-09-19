@@ -24,6 +24,7 @@ var searchCmd = &cobra.Command{
 Search is case insensitive and searches across title, project, tags, JIRA ID, notes, status, and priority.`,
 	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		query := args[0]
 		
 		// Get flags from list command (reuse the same filtering options)

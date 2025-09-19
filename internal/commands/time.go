@@ -20,6 +20,7 @@ Examples:
   wrok start 42 --no-ui # Start timer without UI`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
 			fmt.Printf("Error: invalid task ID '%s'\n", args[0])
@@ -51,6 +52,7 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop tracking time",
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		session, err := db.StopActiveSession()
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -67,6 +69,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current time tracking status",
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		session, err := db.GetActiveSession()
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)

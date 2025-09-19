@@ -13,6 +13,7 @@ var doneCmd = &cobra.Command{
 	Short: "Mark a task as completed",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
 			fmt.Printf("Error: invalid task ID '%s'\n", args[0])
@@ -37,6 +38,7 @@ var undoneCmd = &cobra.Command{
 	Short: "Mark a completed task back to todo status",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
 			fmt.Printf("Error: invalid task ID '%s'\n", args[0])

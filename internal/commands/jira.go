@@ -26,6 +26,7 @@ Example output:
   APP-456 Add new feature   -    1    2    4    1    -    -      8
   Total                     2    4    3    4    1    0    0     14`,
 	Run: func(cmd *cobra.Command, args []string) {
+		initDB()
 		if err := generateJiraTimesheet(); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
