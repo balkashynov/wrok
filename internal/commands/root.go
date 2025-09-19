@@ -36,4 +36,6 @@ func init() {
 	rootCmd.AddCommand(undoneCmd)
 	rootCmd.AddCommand(archiveCmd)
 	rootCmd.AddCommand(unarchiveCmd)
+	rootCmd.AddCommand(jiraCmd)
+	rootCmd.AddCommand(helpCmd)
 }

@@ -73,6 +73,23 @@ func GetActiveSession() (*models.Session, error) {
 	return &session, nil
 }
 
+// GetSessionsInRange returns all sessions within the specified date range
+func GetSessionsInRange(startTime, endTime time.Time) ([]models.Session, error) {
+	var sessions []models.Session
+
+	err := DB.Where("started_at >= ? AND started_at <= ? AND finished_at IS NOT NULL", startTime, endTime).
+		Preload("Task").
+		Preload("Task.Tags").
+		Order("started_at ASC").
+		Find(&sessions).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return sessions, nil
+}
+
 // GetTaskByID retrieves a task by ID
 func GetTaskByID(id uint) (*models.Task, error) {
 	var task models.Task

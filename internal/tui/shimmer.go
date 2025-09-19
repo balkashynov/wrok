@@ -68,8 +68,9 @@ func (s *ShimmerState) Update(visibleLen int) {
 	now := time.Now()
 	elapsed := now.Sub(s.LastUpdate)
 	
-	// Only update if enough time has passed
-	if elapsed.Milliseconds() < int64(s.Config.SpeedMs) {
+	// Only update if enough time has passed, but be more tolerant
+	minInterval := int64(s.Config.SpeedMs * 8 / 10) // 80% of target interval (80ms for 100ms target)
+	if elapsed.Milliseconds() < minInterval {
 		return
 	}
 	
@@ -90,14 +91,13 @@ func (s *ShimmerState) Update(visibleLen int) {
 		return
 	}
 	
-	// Calculate velocity: how many glyphs to advance per tick
-	ticksPerCycle := float64(s.Config.CycleMs) / float64(s.Config.SpeedMs)
-	// Allow shimmer to travel beyond the text (start before, end after)
+	// Calculate velocity based on actual elapsed time for smoother animation
 	totalDistance := float64(visibleLen) * (1.0 + 2.0*s.Config.WidthRatio) // Add buffer on both sides
-	velocity := totalDistance / ticksPerCycle
-	
-	// Advance center position
-	s.Center += velocity
+	velocityPerMs := totalDistance / float64(s.Config.CycleMs) // pixels per millisecond
+	actualAdvance := velocityPerMs * float64(elapsed.Milliseconds())
+
+	// Advance center position by actual elapsed time
+	s.Center += actualAdvance
 	
 	// Check if cycle is complete (shimmer has passed completely beyond the text)
 	maxCenter := float64(visibleLen) + float64(visibleLen)*s.Config.WidthRatio

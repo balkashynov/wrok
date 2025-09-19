@@ -12,6 +12,9 @@ import (
 	"github.com/balkashynov/wrok/internal/models"
 )
 
+// sessionUpdateMsg is sent periodically to update active session data
+type sessionUpdateMsg struct{}
+
 // ListModel represents the TUI model for listing tasks
 type ListModel struct {
 	width  int
@@ -37,6 +40,13 @@ type ListModel struct {
 	// Edit modal state
 	editModalOpen bool
 	editModel     *AddTaskModel // Embedded edit modal
+
+	// Timer modal state
+	timerModalOpen bool
+	timerModel     *TimerModel // Embedded timer modal
+
+	// Active session tracking for live status updates
+	activeSession *models.Session // Current active session (if any)
 	
 	// Shimmer effect for selected task title
 	shimmer *ShimmerState
@@ -54,6 +64,7 @@ const (
 	FocusSearch
 	FocusModal
 	FocusEdit
+	FocusTimer
 )
 
 // NewListModel creates a new list TUI model
@@ -74,6 +85,9 @@ func NewListModel(tasks []models.Task) ListModel {
 		sortDirection: "desc",
 		sortSelection: 0,
 	}
+
+	// Load active session for live status updates
+	model = model.updateActiveSession()
 	
 	// Pre-select first task if available
 	if len(tasks) > 0 {
@@ -86,20 +100,49 @@ func NewListModel(tasks []models.Task) ListModel {
 // Init initializes the model
 func (m ListModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
-	
+
 	// Start shimmer ticking if enabled
 	if m.shimmer.ShouldTick() {
 		cmds = append(cmds, tea.Tick(m.shimmer.GetTickInterval(), func(time.Time) tea.Msg {
 			return shimmerTickMsg{}
 		}))
 	}
-	
+
+	// Start session update timer for live status display
+	cmds = append(cmds, tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return sessionUpdateMsg{}
+	}))
+
 	return tea.Batch(cmds...)
 }
 
 // Update handles messages
 func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case timerTickMsg, animationTickMsg:
+		// Always pass timer messages to timer modal if open
+		if m.timerModalOpen && m.timerModel != nil {
+			return m.handleTimerModal(msg)
+		}
+		return m, nil
+
+	case sessionUpdateMsg:
+		// Update active session data for live status display
+		m = m.updateActiveSession()
+		// Continue the session update timer
+		sessionCmd := tea.Tick(time.Second, func(time.Time) tea.Msg {
+			return sessionUpdateMsg{}
+		})
+
+		// Also continue shimmer if it should be ticking
+		if m.focus == FocusTable && m.shimmer.ShouldTick() {
+			shimmerCmd := tea.Tick(m.shimmer.GetTickInterval(), func(time.Time) tea.Msg {
+				return shimmerTickMsg{}
+			})
+			return m, tea.Batch(sessionCmd, shimmerCmd)
+		}
+		return m, sessionCmd
+
 	case shimmerTickMsg:
 		// Continue shimmer animation if focused on table
 		if m.focus == FocusTable && m.shimmer.ShouldTick() {
@@ -134,6 +177,10 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		if m.focus == FocusEdit && m.editModalOpen {
 			return m.handleEditModalKeys(msg)
+		}
+
+		if m.focus == FocusTimer && m.timerModalOpen {
+			return m.handleTimerModal(msg)
 		}
 		
 		switch msg.String() {
@@ -199,8 +246,13 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openEditModal()
 			}
 			return m, nil
-			
-		// TODO: Add other hotkeys (s)
+
+		case "s", "S":
+			// Start/stop timer for selected task
+			if len(m.tasks) > 0 && m.selectedTask < len(m.tasks) {
+				return m.toggleTimer()
+			}
+			return m, nil
 		}
 	}
 	
@@ -818,7 +870,15 @@ func (m ListModel) View() string {
 		m.editModel.height = m.height
 		return m.editModel.View()
 	}
-	
+
+	// Overlay timer modal if open
+	if m.timerModalOpen && m.timerModel != nil {
+		// Set the timer model dimensions to match our window
+		m.timerModel.width = m.width
+		m.timerModel.height = m.height
+		return m.timerModel.View()
+	}
+
 	return mainView
 }
 
@@ -953,7 +1013,14 @@ func (m ListModel) renderTaskTable(width int, height int) string {
 		} else if task.Status == "archived" {
 			statusText = "archive"
 		} else {
-			statusText = "○ todo"
+			// Check if this task has an active session
+			if m.activeSession != nil && m.activeSession.TaskID == task.ID {
+				// Show elapsed time for running task
+				elapsed := time.Since(m.activeSession.StartedAt)
+				statusText = fmt.Sprintf("⏱ %s", formatDurationShort(elapsed))
+			} else {
+				statusText = "○ todo"
+			}
 		}
 		
 		// Format due date text (always plain text for consistent column alignment)
@@ -1035,7 +1102,13 @@ func (m ListModel) renderTaskTable(width int, height int) string {
 		} else if task.Status == "archived" {
 			coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDisabledText)).Render(statusText)
 		} else {
-			coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(statusText)
+			// Check if this task is running (has active session)
+			if m.activeSession != nil && m.activeSession.TaskID == task.ID {
+				// Use bright accent color for running tasks
+				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccentBright)).Render(statusText)
+			} else {
+				coloredStatusText = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondaryText)).Render(statusText)
+			}
 		}
 		
 		var coloredDueText string
@@ -1572,6 +1645,15 @@ func (m ListModel) renderTaskDetails(width, height int) string {
 			statusIcon = "▪"
 			statusColor = ColorDisabledText
 			statusText = "archived"
+		} else {
+			// Check if this task has an active session (same logic as table)
+			if m.activeSession != nil && m.activeSession.TaskID == task.ID {
+				// Show elapsed time for running task
+				elapsed := time.Since(m.activeSession.StartedAt)
+				statusIcon = "⏱️"
+				statusColor = ColorAccentBright
+				statusText = fmt.Sprintf("running (%s)", formatDurationShort(elapsed))
+			}
 		}
 		
 		statusStyle := lipgloss.NewStyle().
@@ -1829,8 +1911,17 @@ func (m ListModel) renderNarrowTaskDetails(width, height int) string {
 		} else if task.Status == "archived" {
 			statusIcon = "▪"
 			statusColor = ColorDisabledText
+		} else {
+			// Check if this task has an active session (same logic as table)
+			if m.activeSession != nil && m.activeSession.TaskID == task.ID {
+				// Show elapsed time for running task
+				elapsed := time.Since(m.activeSession.StartedAt)
+				statusIcon = "⏱️"
+				statusColor = ColorAccentBright
+				statusText = fmt.Sprintf("running (%s)", formatDurationShort(elapsed))
+			}
 		}
-		statusLine := fmt.Sprintf("%s %s", statusIcon, 
+		statusLine := fmt.Sprintf("%s Status: %s", statusIcon,
 			lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Bold(true).Render(statusText))
 		b.WriteString(fieldStyle.Render(statusLine))
 		b.WriteString("\n")
@@ -2161,4 +2252,117 @@ func (m ListModel) renderMinimalView() string {
 	b.WriteString(messageStyle.Render("q/esc to quit"))
 	
 	return b.String()
+}
+
+// toggleTimer handles start/stop timer functionality
+func (m ListModel) toggleTimer() (ListModel, tea.Cmd) {
+	task := m.tasks[m.selectedTask]
+
+	// Check if there's already an active session
+	activeSession, err := db.GetActiveSession()
+	if err != nil {
+		// Handle error - for now just ignore
+		return m, nil
+	}
+
+	// If there's an active session for this task, stop it
+	if activeSession != nil && activeSession.TaskID == task.ID {
+		stoppedSession, err := db.StopActiveSession()
+		if err != nil {
+			return m, nil
+		}
+
+		// Show success message briefly (could add a status message system later)
+		duration := time.Duration(stoppedSession.DurationSeconds) * time.Second
+		// For now, just return - could add status notification later
+		_ = duration
+		return m, nil
+	}
+
+	// If there's an active session for a different task, stop it first
+	if activeSession != nil {
+		_, err := db.StopActiveSession()
+		if err != nil {
+			return m, nil
+		}
+	}
+
+	// Start new session for the selected task
+	session, err := db.StartSession(task.ID)
+	if err != nil {
+		return m, nil
+	}
+
+	// Open timer modal
+	return m.openTimerModal(session)
+}
+
+// openTimerModal opens the timer modal for the given session
+func (m ListModel) openTimerModal(session *models.Session) (ListModel, tea.Cmd) {
+	timerModel := NewTimerModel(session)
+	m.timerModalOpen = true
+	m.timerModel = &timerModel
+	m.focus = FocusTimer
+	m.shimmer.SetActive(false) // Stop shimmer when modal is open
+
+	return m, timerModel.Init()
+}
+
+// handleTimerModal handles all messages when in timer mode (including ticks)
+func (m ListModel) handleTimerModal(msg tea.Msg) (ListModel, tea.Cmd) {
+	if m.timerModel == nil {
+		return m, nil
+	}
+
+	// Update the timer model with any message (key, tick, etc.)
+	updatedTimerModel, cmd := m.timerModel.Update(msg)
+	timerModel := updatedTimerModel.(TimerModel)
+	m.timerModel = &timerModel
+
+	// Check if timer should close (stopping, exiting, or quit message)
+	if timerModel.stopping || timerModel.exiting {
+		// Close timer modal and return to list
+		m.timerModalOpen = false
+		m.timerModel = nil
+		m.focus = FocusTable
+		m.shimmer.SetActive(true)
+
+		// Handle the timer completion (same logic as in RunTimerTUI)
+		if timerModel.stopping {
+			// Stop the active session
+			stoppedSession, err := db.StopActiveSession()
+			if err == nil {
+				// Could show a brief success message
+				_ = stoppedSession
+			}
+		}
+
+		// Refresh tasks to show any status changes
+		return m.refreshTasks()
+	}
+
+	return m, cmd
+}
+
+// updateActiveSession fetches the current active session
+func (m ListModel) updateActiveSession() ListModel {
+	activeSession, err := db.GetActiveSession()
+	if err != nil {
+		// No active session or error
+		m.activeSession = nil
+	} else {
+		m.activeSession = activeSession
+	}
+	return m
+}
+
+// formatDurationShort formats duration for status column (compact format)
+func formatDurationShort(d time.Duration) string {
+	if d.Hours() >= 1 {
+		return fmt.Sprintf("%.1fh", d.Hours())
+	} else if d.Minutes() >= 1 {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	} else {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
 }
