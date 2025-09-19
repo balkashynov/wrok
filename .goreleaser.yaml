@@ -63,13 +63,3 @@ brews:
     install: |
       bin.install "wrok"
 
-scoops:
-  - name: wrok
-    repository:
-      owner: balkashynov
-      name: scoop-bucket
-      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
-    url_template: "https://github.com/balkashynov/wrok/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    homepage: "https://github.com/balkashynov/wrok"
-    description: "A powerful command-line tool that combines lightweight todo management with time tracking"
-    license: "MIT"
