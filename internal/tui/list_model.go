@@ -34,6 +34,10 @@ type ListModel struct {
 	sortDirection string // "asc", "desc"
 	sortSelection int    // selected option in modal
 	
+	// Edit modal state
+	editModalOpen bool
+	editModel     *AddTaskModel // Embedded edit modal
+	
 	// Shimmer effect for selected task title
 	shimmer *ShimmerState
 	
@@ -49,6 +53,7 @@ const (
 	FocusTable Focus = iota
 	FocusSearch
 	FocusModal
+	FocusEdit
 )
 
 // NewListModel creates a new list TUI model
@@ -127,6 +132,10 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSortModalKeys(msg)
 		}
 		
+		if m.focus == FocusEdit && m.editModalOpen {
+			return m.handleEditModalKeys(msg)
+		}
+		
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			// Handle escape key - exit search mode first if active, otherwise quit
@@ -184,7 +193,14 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.shimmer.SetActive(false) // Stop shimmer when modal is open
 			return m, nil
 			
-		// TODO: Add other hotkeys (e, s)
+		case "e", "E":
+			// Edit selected task
+			if len(m.tasks) > 0 && m.selectedTask < len(m.tasks) {
+				return m.openEditModal()
+			}
+			return m, nil
+			
+		// TODO: Add other hotkeys (s)
 		}
 	}
 	
@@ -645,6 +661,86 @@ func (m ListModel) refreshTasks() (ListModel, tea.Cmd) {
 	return m, nil
 }
 
+// openEditModal opens the edit modal for the selected task
+func (m ListModel) openEditModal() (ListModel, tea.Cmd) {
+	if len(m.tasks) == 0 || m.selectedTask >= len(m.tasks) {
+		return m, nil
+	}
+	
+	// Get the selected task
+	task := m.tasks[m.selectedTask]
+	
+	// Create prefilled data from the task
+	prefilled := make(map[string]string)
+	prefilled["title"] = task.Title
+	prefilled["project"] = task.Project
+	prefilled["jira"] = task.JiraID
+	prefilled["notes"] = task.Note
+	
+	// Convert priority to string
+	if task.Priority > 0 {
+		priorities := []string{"", "low", "medium", "high"}
+		if int(task.Priority) < len(priorities) {
+			prefilled["priority"] = priorities[task.Priority]
+		}
+	}
+	
+	// Convert tags to comma-separated string with # prefix for each tag
+	if len(task.Tags) > 0 {
+		var tagNames []string
+		for _, tag := range task.Tags {
+			tagNames = append(tagNames, "#"+tag.Name)
+		}
+		prefilled["tags"] = strings.Join(tagNames, ", ")
+	}
+	
+	// Convert due date to string
+	if task.Due != nil {
+		prefilled["due_date"] = task.Due.Format("02/01/2006")
+	}
+	
+	// Create edit model
+	editModel := NewEditTaskModel(task.ID, prefilled)
+	
+	// Set up list model state
+	m.editModalOpen = true
+	m.editModel = &editModel
+	m.focus = FocusEdit
+	m.shimmer.SetActive(false)
+	
+	return m, nil
+}
+
+// handleEditModalKeys handles keys for the edit modal
+func (m ListModel) handleEditModalKeys(msg tea.KeyMsg) (ListModel, tea.Cmd) {
+	if m.editModel == nil {
+		return m, nil
+	}
+	
+	// Update the edit model
+	updatedEditModel, cmd := m.editModel.Update(msg)
+	editModel := updatedEditModel.(AddTaskModel)
+	m.editModel = &editModel
+	
+	// Check if edit is complete or cancelled
+	if editModel.completed || editModel.cancelled {
+		// Close edit modal and return to list
+		m.editModalOpen = false
+		m.editModel = nil
+		m.focus = FocusTable
+		m.shimmer.SetActive(true)
+		
+		// If task was edited successfully, refresh the task list
+		if editModel.completed {
+			return m.refreshTasks()
+		}
+		
+		return m, nil
+	}
+	
+	return m, cmd
+}
+
 // View renders the TUI
 func (m ListModel) View() string {
 	if m.width == 0 || m.height == 0 {
@@ -715,6 +811,14 @@ func (m ListModel) View() string {
 		return m.renderSortModal(mainView)
 	}
 	
+	// Overlay edit modal if open
+	if m.editModalOpen && m.editModel != nil {
+		// Set the edit model dimensions to match our window
+		m.editModel.width = m.width
+		m.editModel.height = m.height
+		return m.editModel.View()
+	}
+	
 	return mainView
 }
 
@@ -735,7 +839,7 @@ func (m ListModel) renderTaskTable(width int, height int) string {
 		Bold(true).
 		Foreground(lipgloss.Color(ColorAccentBright))
 	
-	b.WriteString(headerStyle.Render("📋 Tasks"))
+	b.WriteString(headerStyle.Render("  📋 Tasks"))
 	b.WriteString("\n\n")
 	
 	// Always show column headers, even when no tasks

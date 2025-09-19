@@ -7,11 +7,17 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/balkashynov/wrok/internal/db"
+	"github.com/balkashynov/wrok/internal/tui"
 )
 
 var startCmd = &cobra.Command{
 	Use:   "start [task-id]",
 	Short: "Start tracking time on a task",
+	Long: `Start tracking time on a task. Opens interactive timer by default, use --no-ui for simple start.
+
+Examples:
+  wrok start 42        # Start timer with interactive UI
+  wrok start 42 --no-ui # Start timer without UI`,
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		taskID, err := strconv.ParseUint(args[0], 10, 32)
@@ -26,8 +32,18 @@ var startCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("⏱️  Started tracking time for task #%d: %s\n", session.TaskID, session.Task.Title)
-		fmt.Printf("Started at: %s\n", session.StartedAt.Format("15:04:05"))
+		// Check if --no-ui flag is set
+		noUI, _ := cmd.Flags().GetBool("no-ui")
+		if noUI {
+			// Simple non-interactive start
+			fmt.Printf("⏱️  Started tracking time for task #%d: %s\n", session.TaskID, session.Task.Title)
+			fmt.Printf("Started at: %s\n", session.StartedAt.Format("15:04:05"))
+		} else {
+			// Interactive timer UI
+			if err := tui.RunTimerTUI(session); err != nil {
+				fmt.Printf("Error: %v\n", err)
+			}
+		}
 	},
 }
 
@@ -67,6 +83,11 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Started at: %s\n", session.StartedAt.Format("15:04:05"))
 		fmt.Printf("Elapsed time: %s\n", formatDuration(elapsed))
 	},
+}
+
+func init() {
+	// Add --no-ui flag to start command
+	startCmd.Flags().Bool("no-ui", false, "Start timer without interactive UI")
 }
 
 // formatDuration formats a duration in a human-readable way
