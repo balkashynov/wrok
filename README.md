@@ -22,17 +22,10 @@ A powerful command-line tool that combines lightweight todo management with time
 
 ## Installation
 
-### From Releases (Recommended)
-Download the latest binary from [GitHub Releases](https://github.com/balkashynov/wrok/releases):
-
+### Homebrew (macOS/Linux)
 ```bash
-# Linux/macOS
-curl -L https://github.com/balkashynov/wrok/releases/latest/download/wrok-linux-amd64 -o wrok
-chmod +x wrok
-sudo mv wrok /usr/local/bin/
-
-# Or for macOS with Homebrew
-brew install balkashynov/tap/wrok
+brew tap balkashynov/tap
+brew install wrok
 ```
 
 ### From Source
