@@ -11,6 +11,8 @@ require (
 	gorm.io/gorm v1.30.1
 )
 
+exclude github.com/mattn/go-sqlite3 v1.14.22
+
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
