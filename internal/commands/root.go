@@ -5,6 +5,12 @@ import (
 	"github.com/balkashynov/wrok/internal/db"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "wrok",
 	Short: "A CLI todo and time tracker",
@@ -16,6 +22,13 @@ Track your tasks, monitor your time, and generate reports all from the terminal.
 			panic(err) // For now, panic on DB init failure
 		}
 	},
+}
+
+// SetVersion sets the version information
+func SetVersion(v, c, d string) {
+	version = v
+	commit = c
+	date = d
 }
 
 // Execute runs the root command
@@ -38,4 +51,5 @@ func init() {
 	rootCmd.AddCommand(unarchiveCmd)
 	rootCmd.AddCommand(jiraCmd)
 	rootCmd.AddCommand(helpCmd)
+	rootCmd.AddCommand(versionCmd)
 }

@@ -1,0 +1,75 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "386"
+      - amd64
+      - arm64
+    main: ./cmd/wrok
+    binary: wrok
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+brews:
+  - name: wrok
+    repository:
+      owner: balkashynov
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    url_template: "https://github.com/balkashynov/wrok/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    directory: Formula
+    homepage: "https://github.com/balkashynov/wrok"
+    description: "A powerful command-line tool that combines lightweight todo management with time tracking"
+    license: "MIT"
+    test: |
+      system "#{bin}/wrok --version"
+    install: |
+      bin.install "wrok"
+
+scoops:
+  - name: wrok
+    repository:
+      owner: balkashynov
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    url_template: "https://github.com/balkashynov/wrok/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    homepage: "https://github.com/balkashynov/wrok"
+    description: "A powerful command-line tool that combines lightweight todo management with time tracking"
+    license: "MIT"
